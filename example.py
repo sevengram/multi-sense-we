@@ -19,7 +19,7 @@
     Should be much faster on a modern GPU.
 
     GPU command:
-        THEANO_FLAGS=mode=FAST_RUN,device=gpu,floatX=float32 python skipgram_word_embeddings.py
+        THEANO_FLAGS=mode=FAST_RUN,device=gpu,floatX=float32 python examples.py
 
     Dataset: 5,845,908 Hacker News comments.
     Obtain the dataset at:
@@ -48,13 +48,12 @@ dim_proj = 256  # embedding space dimension
 save = True
 load_model = False
 load_tokenizer = False
-train_model = True
 output_dir = "./output"
 model_load_fname = "tiny.pkl"
 model_save_fname = "tiny.pkl"
 tokenizer_fname = "tiny_tokenizer.pkl"
 
-data_path = "data/tiny.json"
+data_fname = "./data/tiny.json"
 
 # text preprocessing utils
 html_tags = re.compile(r'<.*?>')
@@ -71,32 +70,53 @@ def clean_comment(comment):
     return c
 
 
-def text_generator(path=data_path):
+def text_generator(path=data_fname):
     f = open(path)
     for i, l in enumerate(f):
         comment_data = json.loads(l)
         comment_text = comment_data["comment_text"]
         comment_text = clean_comment(comment_text)
-        if i % 10000 == 0:
+        if i % 10 == 0:
             print(i)
         yield comment_text
     f.close()
 
 
-# model management
-if load_tokenizer:
-    print('Load tokenizer...')
-    tokenizer = cPickle.load(open(os.path.join(output_dir, tokenizer_fname), 'rb'))
-else:
-    print("Fit tokenizer...")
-    tokenizer = text.Tokenizer(nb_words=max_features)
-    tokenizer.fit_on_texts(text_generator())
-    if save:
-        print("Save tokenizer...")
-        cPickle.dump(tokenizer, open(os.path.join(output_dir, tokenizer_fname), "wb"))
+def embed_word(w):
+    i = word_index.get(w)
+    if (not i) or (i < skip_top) or (i >= max_features):
+        return None
+    return norm_weights[i]
 
-# training process
-if train_model:
+
+def closest_to_point(point, nb_closest=10):
+    proximities = np.dot(norm_weights, point)
+    tups = list(zip(list(range(len(proximities))), proximities))
+    tups.sort(key=lambda x: x[1], reverse=True)
+    return [(reverse_word_index.get(t[0]), t[1]) for t in tups[:nb_closest]]
+
+
+def closest_to_word(w, nb_closest=10):
+    i = word_index.get(w)
+    if (not i) or (i < skip_top) or (i >= max_features):
+        return []
+    return closest_to_point(norm_weights[i].T, nb_closest)
+
+
+if __name__ == '__main__':
+    # model management
+    if load_tokenizer:
+        print('Load tokenizer...')
+        tokenizer = cPickle.load(open(os.path.join(output_dir, tokenizer_fname), 'rb'))
+    else:
+        print("Fit tokenizer...")
+        tokenizer = text.Tokenizer(nb_words=max_features)
+        tokenizer.fit_on_texts(text_generator())
+        if save:
+            print("Save tokenizer...")
+            cPickle.dump(tokenizer, open(os.path.join(output_dir, tokenizer_fname), "wb"))
+
+    # training process
     if load_model:
         print('Load model...')
         model = cPickle.load(open(os.path.join(output_dir, model_load_fname), 'rb'))
@@ -137,77 +157,42 @@ if train_model:
         print("Saving model...")
         cPickle.dump(model, open(os.path.join(output_dir, model_save_fname), "wb"))
 
-print("It's test time!")
+    print("It's test time!")
 
-# recover the embedding weights trained with skipgram:
-weights = model.layers[0].get_weights()[0]
+    # recover the embedding weights trained with skipgram:
+    weights = model.layers[0].get_weights()[0]
 
-# we no longer need this
-del model
+    # we no longer need this
+    del model
 
-weights[:skip_top] = np.zeros((skip_top, dim_proj))
-norm_weights = np_utils.normalize(weights)
+    weights[:skip_top] = np.zeros((skip_top, dim_proj))
+    norm_weights = np_utils.normalize(weights)
 
-word_index = tokenizer.word_index
-reverse_word_index = dict([(v, k) for k, v in list(word_index.items())])
+    word_index = tokenizer.word_index
+    reverse_word_index = dict([(v, k) for k, v in list(word_index.items())])
 
+    words = [
+        "article",  # post, story, hn, read, comments
+        "3",  # 6, 4, 5, 2
+        "two",  # three, few, several, each
+        "great",  # love, nice, working, looking
+        "data",  # information, memory, database
+        "money",  # company, pay, customers, spend
+        "years",  # ago, year, months, hours, week, days
+        "android",  # ios, release, os, mobile, beta
+        "javascript",  # js, css, compiler, library, jquery, ruby
+        "look",  # looks, looking
+        "business",  # industry, professional, customers
+        "company",  # companies, startup, founders, startups
+        "after",  # before, once, until
+        "own",  # personal, our, having
+        "us",  # united, country, american, tech, diversity, usa, china, sv
+        "using",  # javascript, js, tools (lol)
+        "here",  # hn, post, comments
+    ]
 
-def embed_word(w):
-    i = word_index.get(w)
-    if (not i) or (i < skip_top) or (i >= max_features):
-        return None
-    return norm_weights[i]
-
-
-def closest_to_point(point, nb_closest=10):
-    proximities = np.dot(norm_weights, point)
-    tups = list(zip(list(range(len(proximities))), proximities))
-    tups.sort(key=lambda x: x[1], reverse=True)
-    return [(reverse_word_index.get(t[0]), t[1]) for t in tups[:nb_closest]]
-
-
-def closest_to_word(w, nb_closest=10):
-    i = word_index.get(w)
-    if (not i) or (i < skip_top) or (i >= max_features):
-        return []
-    return closest_to_point(norm_weights[i].T, nb_closest)
-
-
-# the resuls in comments below were for:
-# 5.8M HN comments
-# dim_proj = 256
-# nb_epoch = 2
-# optimizer = rmsprop
-# loss = mse
-# max_features = 50000
-# skip_top = 100
-# negative_samples = 1.
-# window_size = 4
-# and frequency subsampling of factor 10e-5.
-
-
-words = [
-    "article",  # post, story, hn, read, comments
-    "3",  # 6, 4, 5, 2
-    "two",  # three, few, several, each
-    "great",  # love, nice, working, looking
-    "data",  # information, memory, database
-    "money",  # company, pay, customers, spend
-    "years",  # ago, year, months, hours, week, days
-    "android",  # ios, release, os, mobile, beta
-    "javascript",  # js, css, compiler, library, jquery, ruby
-    "look",  # looks, looking
-    "business",  # industry, professional, customers
-    "company",  # companies, startup, founders, startups
-    "after",  # before, once, until
-    "own",  # personal, our, having
-    "us",  # united, country, american, tech, diversity, usa, china, sv
-    "using",  # javascript, js, tools (lol)
-    "here",  # hn, post, comments
-]
-
-for w in words:
-    res = closest_to_word(w)
-    print('====', w)
-    for r in res:
-        print(r)
+    for w in words:
+        res = closest_to_word(w)
+        print('====', w)
+        for r in res:
+            print(r)
