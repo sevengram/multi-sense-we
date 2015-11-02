@@ -9,7 +9,7 @@ from keras.preprocessing import text, sequence
 
 
 class WordEmbeddingModel(object):
-    def __init__(self, words_limit=50000, dimension=128):
+    def __init__(self, words_limit=5000, dimension=128):
         self.words_limit = words_limit
         self.dimension = dimension
         self.tokenizer = None
@@ -46,7 +46,7 @@ class WordEmbeddingModel(object):
 
 
 class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
-    def __init__(self, words_limit=50000, dimension=128, window_size=4, neg_sample_rate=1.):
+    def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1.):
         super(SkipGramNegSampEmbeddingModel, self).__init__(words_limit, dimension)
         self.neg_sample_rate = neg_sample_rate
         self.window_size = window_size
