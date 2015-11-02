@@ -16,7 +16,8 @@ class WordEmbeddingModel(object):
         self.word_vectors = None
 
     def init_word_vectors(self):
-        self.word_vectors = (random.randn(self.words_limit, self.dimension) - 0.5) / self.dimension
+        self.word_vectors = (random.randn(self.words_limit, self.dimension).astype(
+            dtype='float32') - 0.5) / self.dimension
 
     def build_vocab(self, texts, spare_size=1):
         self.tokenizer = text.Tokenizer(nb_words=self.words_limit)
@@ -60,8 +61,8 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
     def fit(self, texts, lrate=.1, sampling=True, **kwargs):
         x = theano.shared(self.word_vectors, name="x")
         y = T.bscalar("y")
-        w = theano.shared(zeros((self.words_limit, self.dimension)), name="w")
-        b = theano.shared(zeros(self.words_limit), name="b")
+        w = theano.shared(zeros((self.words_limit, self.dimension), dtype='float32'), name="w")
+        b = theano.shared(zeros(self.words_limit, dtype='float32'), name="b")
         i = T.iscalar("i")
         j = T.iscalar("j")
 
