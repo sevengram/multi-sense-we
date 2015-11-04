@@ -53,7 +53,7 @@ class WordEmbeddingModel(object):
         self.word_list = {v: k for k, v in self.tokenizer.word_index.iteritems()}
 
     def nearest_words(self, word, limit=20):
-        if not self.tokenizer or not self.word_vectors:
+        if self.tokenizer is None or self.word_vectors is None:
             print('load vocab and model first!')
             return None
         word_index = self.tokenizer.word_index.get(word)
