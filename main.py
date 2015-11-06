@@ -12,11 +12,14 @@ def text_generator(path, total_lines=0):
     start_time = time.time()
     with open(path) as f:
         for i, l in enumerate(f):
-            if i % 10 == 0 and i != 0 and total_lines != 0:
+            if i % 20 == 0 and i != 0 and total_lines != 0:
                 percent = float(i) / total_lines
-                end_time = start_time + (time.time() - start_time) / percent
+                remaining_time = (time.time() - start_time) / percent
+                end_time = start_time + remaining_time
                 end_time_str = datetime.datetime.fromtimestamp(int(end_time)).ctime()
-                sys.stdout.write('%.2f%%, estimated end time: %s\r' % (percent * 100, end_time_str))
+                sys.stdout.write(
+                    '%.2f%%, estimated remaining time: %d min, expected end time: %s\r' % (
+                        percent * 100, int(remaining_time / 60), end_time_str))
                 sys.stdout.flush()
             yield l
 
@@ -64,7 +67,7 @@ if __name__ == '__main__':
     else:
         print('start fitting model...')
         lc = file_lines(args.data)
-        model.fit(text_generator(args.data, lc), sampling=True)
+        model.fit2(text_generator(args.data, lc), sampling=True)
     print('\nfinish!')
 
     if args.vocab_out and not args.vocab_in:
