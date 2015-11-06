@@ -14,12 +14,16 @@ class WordEmbeddingModel(object):
         self.words_limit = words_limit
         self.dimension = dimension
         self.tokenizer = None
-        self.word_vectors = None
         self.word_list = None
+        self.word_vectors = None
+        self.weight_matrix = None
+        self.biases = None
 
-    def init_word_vectors(self):
+    def init_values(self):
         self.word_vectors = (random.randn(self.words_limit, self.dimension).astype(
             dtype='float32') - 0.5) / self.dimension
+        self.weight_matrix = zeros((self.words_limit, self.dimension), dtype='float32')
+        self.biases = zeros(self.words_limit, dtype='float32')
 
     def build_vocab(self, texts, spare_size=1):
         self.tokenizer = text.Tokenizer(nb_words=self.words_limit)
@@ -80,7 +84,7 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                                      sampling_table=sampling_table)
 
     def fit(self, texts, lrate=.1, sampling=True, **kwargs):
-        self.init_word_vectors()
+        self.init_values()
         x = theano.shared(self.word_vectors, name="x")
         y = T.bscalar("y")
         w = theano.shared(zeros((self.words_limit, self.dimension), dtype='float32'), name="w")
@@ -105,3 +109,29 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
             for k, (ii, jj) in enumerate(couples):
                 train(ii - 1, labels[k], jj - 1)
         self.word_vectors = x.eval()
+
+    def fit2(self, texts, lrate=.1, sampling=True, **kwargs):
+        self.init_values()
+        x = T.fvector("x")
+        y = T.bscalar("y")
+        w = T.fvector("w")
+        b = T.fscalar("b")
+
+        hx = 1 / (1 + T.exp(-T.dot(x, w) - b))
+        gx = (y - hx) * w
+        gw = (y - hx) * x
+        gb = y - hx
+
+        train = theano.function(
+            inputs=[x, y, w, b],
+            outputs=[gx, gw, gb])
+
+        for couples, labels in self._sequentialize(texts, sampling):
+            for i, (wi, wj) in enumerate(couples):
+                dx, dw, db = train(self.word_vectors[wi - 1],
+                                   labels[i],
+                                   self.weight_matrix[wj - 1],
+                                   self.biases[wj - 1])
+                self.word_vectors[wi - 1] += lrate * dx
+                self.weight_matrix[wj - 1] += lrate * dw
+                self.biases[wj - 1] += lrate * db
