@@ -5,7 +5,7 @@ import time
 import datetime
 import argparse
 
-from models import SkipGramNegSampEmbeddingModel
+from models import KerasEmbeddingModel
 
 
 def text_generator(path, total_lines=0):
@@ -45,8 +45,7 @@ if __name__ == '__main__':
     parser.add_argument("--test", help="Run a manual test after loading/training", action='store_true')
     args = parser.parse_args()
 
-    model = SkipGramNegSampEmbeddingModel(words_limit=args.words_limit, dimension=args.dimension,
-                                          window_size=args.window_size)
+    model = KerasEmbeddingModel(words_limit=args.words_limit, dimension=args.dimension, window_size=args.window_size)
     if not args.vocab_in and not args.data:
         print('invalid vocab input')
     if not args.wordvec_in and not args.data:
@@ -67,7 +66,7 @@ if __name__ == '__main__':
     else:
         print('start fitting model...')
         lc = file_lines(args.data)
-        model.fit2(text_generator(args.data, lc), sampling=True)
+        model.fit(text_generator(args.data), sampling=True)
     print('\nfinish!')
 
     if args.vocab_out and not args.vocab_in:

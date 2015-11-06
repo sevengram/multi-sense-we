@@ -2,11 +2,17 @@
 
 import cPickle
 
-import theano
 import numpy
+import theano
 from numpy import random, zeros, linalg
 from theano import tensor as T
+
+from keras.models import Sequential
+from keras.optimizers import SGD
+from keras.utils import generic_utils
 from keras.preprocessing import text, sequence
+
+from layers import WordContextLayer
 
 
 class WordEmbeddingModel(object):
@@ -15,15 +21,14 @@ class WordEmbeddingModel(object):
         self.dimension = dimension
         self.tokenizer = None
         self.word_list = None
-        self.word_vectors = None
+        self.wordvec_matrix = None
         self.weight_matrix = None
         self.biases = None
 
     def init_values(self):
-        self.word_vectors = (random.randn(self.words_limit, self.dimension).astype(
-            dtype='float32') - 0.5) / self.dimension
-        self.weight_matrix = zeros((self.words_limit, self.dimension), dtype='float32')
-        self.biases = zeros(self.words_limit, dtype='float32')
+        self.wordvec_matrix = (random.randn(self.words_limit, self.dimension) - 0.5) / self.dimension
+        self.weight_matrix = zeros((self.words_limit, self.dimension))
+        self.biases = zeros((self.words_limit, 1))
 
     def build_vocab(self, texts, spare_size=1):
         self.tokenizer = text.Tokenizer(nb_words=self.words_limit)
@@ -37,7 +42,7 @@ class WordEmbeddingModel(object):
         self._build_word_list()
 
     def load_word_vectors(self, path):
-        self.word_vectors = cPickle.load(open(path, 'rb'))
+        self.wordvec_matrix = cPickle.load(open(path, 'rb'))
 
     def save_tokenizer(self, path):
         if path:
@@ -45,9 +50,9 @@ class WordEmbeddingModel(object):
 
     def save_word_vectors(self, path):
         if path:
-            cPickle.dump(self.word_vectors, open(path, "wb"))
+            cPickle.dump(self.wordvec_matrix, open(path, "wb"))
 
-    def fit(self, texts, **kwargs):
+    def fit(self, texts, nb_epoch=1, **kwargs):
         raise NotImplementedError()
 
     def _sequentialize(self, texts, **kwargs):
@@ -57,15 +62,15 @@ class WordEmbeddingModel(object):
         self.word_list = {v: k for k, v in self.tokenizer.word_index.iteritems()}
 
     def nearest_words(self, word, limit=20):
-        if self.tokenizer is None or self.word_vectors is None:
+        if self.tokenizer is None or self.wordvec_matrix is None:
             print('load vocab and model first!')
             return None
         word_index = self.tokenizer.word_index.get(word)
-        if word_index is None or word_index - 1 >= self.word_vectors.shape[0]:
+        if word_index is None or word_index - 1 >= self.wordvec_matrix.shape[0]:
             print('can\'t find this word!')
             return None
         else:
-            d = [linalg.norm(self.word_vectors[word_index - 1] - v) for v in self.word_vectors]
+            d = [linalg.norm(self.wordvec_matrix[word_index - 1] - v) for v in self.wordvec_matrix]
             nearest_indices = numpy.argpartition(d, limit)[:limit]
             return {self.word_list[i + 1]: d[i] for i in nearest_indices}
 
@@ -83,39 +88,12 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                                      negative_samples=self.neg_sample_rate,
                                      sampling_table=sampling_table)
 
-    def fit(self, texts, lrate=.1, sampling=True, **kwargs):
+    def fit(self, texts, nb_epoch=1, lrate=.1, sampling=True, **kwargs):
         self.init_values()
-        x = theano.shared(self.word_vectors, name="x")
+        x = T.dvector("x")
         y = T.bscalar("y")
-        w = theano.shared(zeros((self.words_limit, self.dimension), dtype='float32'), name="w")
-        b = theano.shared(zeros(self.words_limit, dtype='float32'), name="b")
-        i = T.iscalar("i")
-        j = T.iscalar("j")
-
-        xi = x[T.cast(i, 'int32')]
-        wj = w[T.cast(j, 'int32')]
-        bj = b[T.cast(j, 'int32')]
-        hx = 1 / (1 + T.exp(-T.dot(xi, wj) - bj))
-        gx = (y - hx) * wj
-        gw = (y - hx) * xi
-        gb = y - hx
-
-        train = theano.function(
-            inputs=[i, y, j],
-            updates=((w, T.inc_subtensor(wj, lrate * gw)),
-                     (b, T.inc_subtensor(bj, lrate * gb)),
-                     (x, T.inc_subtensor(xi, lrate * gx))))
-        for couples, labels in self._sequentialize(texts, sampling):
-            for k, (ii, jj) in enumerate(couples):
-                train(ii - 1, labels[k], jj - 1)
-        self.word_vectors = x.eval()
-
-    def fit2(self, texts, lrate=.1, sampling=True, **kwargs):
-        self.init_values()
-        x = T.fvector("x")
-        y = T.bscalar("y")
-        w = T.fvector("w")
-        b = T.fscalar("b")
+        w = T.dvector("w")
+        b = T.dscalar("b")
 
         hx = 1 / (1 + T.exp(-T.dot(x, w) - b))
         gx = (y - hx) * w
@@ -126,12 +104,37 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
             inputs=[x, y, w, b],
             outputs=[gx, gw, gb])
 
-        for couples, labels in self._sequentialize(texts, sampling):
-            for i, (wi, wj) in enumerate(couples):
-                dx, dw, db = train(self.word_vectors[wi - 1],
-                                   labels[i],
-                                   self.weight_matrix[wj - 1],
-                                   self.biases[wj - 1])
-                self.word_vectors[wi - 1] += lrate * dx
-                self.weight_matrix[wj - 1] += lrate * dw
-                self.biases[wj - 1] += lrate * db
+        for e in range(nb_epoch):
+            for couples, labels in self._sequentialize(texts, sampling):
+                for i, (wi, wj) in enumerate(couples):
+                    dx, dw, db = train(self.wordvec_matrix[wi - 1],
+                                       labels[e],
+                                       self.weight_matrix[wj - 1],
+                                       self.biases[wj - 1])
+                    self.wordvec_matrix[wi - 1] += lrate * dx
+                    self.weight_matrix[wj - 1] += lrate * dw
+                    self.biases[wj - 1] += lrate * db
+
+
+class KerasEmbeddingModel(SkipGramNegSampEmbeddingModel):
+    def fit(self, texts, nb_epoch=1, lrate=.1, sampling=True, **kwargs):
+        self.init_values()
+        model = Sequential()
+        model.add(
+            WordContextLayer(self.words_limit, self.dimension, self.wordvec_matrix, self.weight_matrix, self.biases))
+        sgd = SGD(lr=lrate)
+        model.compile(loss='mse', optimizer=sgd)
+
+        progbar = generic_utils.Progbar(self.tokenizer.document_count)
+        losses = []
+        for e in range(nb_epoch):
+            for i, (couples, labels) in enumerate(self._sequentialize(texts, sampling)):
+                if couples:
+                    d = numpy.array(couples, dtype="int32")
+                    loss = model.train_on_batch(d, labels)
+                    losses.append(loss)
+                    if len(losses) % 100 == 0:
+                        progbar.update(i, values=[("loss", numpy.mean(losses))])
+                        losses = []
+
+        self.wordvec_matrix, self.weight_matrix, self.biases = model.layers[0].get_weights()
