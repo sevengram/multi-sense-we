@@ -79,7 +79,7 @@ if __name__ == '__main__':
     else:
         print('start fitting model...')
         lc = file_lines(args.data)
-        model.fit(text_generator(args.data), sampling=True)
+        model.fit(text_generator(args.data, lc), sampling=True)
     print('\nfinish!')
 
     if args.output and not args.wordvec:
