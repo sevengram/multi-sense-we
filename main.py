@@ -15,12 +15,13 @@ def text_generator(path, total_lines=0):
         for i, l in enumerate(f):
             if i % 20 == 0 and i != 0 and total_lines != 0:
                 percent = float(i) / total_lines
-                remaining_time = (time.time() - start_time) / percent
-                end_time = start_time + remaining_time
+                total_time = (time.time() - start_time) / percent
+                end_time = start_time + total_time
+                remain_time = end_time - time.time()
                 end_time_str = datetime.datetime.fromtimestamp(int(end_time)).ctime()
                 sys.stdout.write(
                     '%.2f%%, estimated remaining time: %d min, expected end time: %s\r' % (
-                        percent * 100, int(remaining_time / 60), end_time_str))
+                        percent * 100, int(remain_time / 60), end_time_str))
                 sys.stdout.flush()
             yield l
 
@@ -79,7 +80,7 @@ if __name__ == '__main__':
     else:
         print('start fitting model...')
         lc = file_lines(args.data)
-        model.fit(text_generator(args.data, lc), sampling=True)
+        model.batch_fit(text_generator(args.data, lc), sampling=True)
     print('\nfinish!')
 
     if args.output and not args.wordvec:
