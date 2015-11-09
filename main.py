@@ -47,6 +47,8 @@ if __name__ == '__main__':
     parser.add_argument('--vocab', metavar='FILE', help='File to load vocab', type=str, required=False)
     parser.add_argument('--wordvec', metavar='FILE', help='File to load word vectors', type=str, required=False)
     parser.add_argument('--output', metavar='FILE', help='Path to save data', type=str, required=False)
+    parser.add_argument('--batch', metavar='SIZE', help='Batch size', type=int, default=8)
+    parser.add_argument('--epoch', metavar='COUNT', help='Epoch count', type=int, default=1)
     parser.add_argument("--test", help="Run a manual test after loading/training", action='store_true')
     args = parser.parse_args()
 
@@ -60,7 +62,8 @@ if __name__ == '__main__':
         print('invalid word vector input')
 
     print('start time: %s' % time.ctime())
-    print('words_limit=%d, dimension=%d, window_size=%d' % (model.words_limit, model.dimension, model.window_size))
+    print('words_limit=%d, dimension=%d, window_size=%d, batch_size=%d' % (
+        model.words_limit, model.dimension, model.window_size, args.batch))
 
     print('start loading vocab...')
     if args.vocab:
@@ -80,7 +83,7 @@ if __name__ == '__main__':
     else:
         print('start fitting model...')
         lc = file_lines(args.data)
-        model.batch_fit(text_generator(args.data, lc), sampling=True)
+        model.batch_fit(text_generator(args.data, lc), sampling=True, batch_size=args.batch)
     print('\nfinish!')
 
     if args.output and not args.wordvec:

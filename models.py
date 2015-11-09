@@ -114,7 +114,7 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                     self.weight_matrix[wj] += lrate * dw
                     self.biases[wj] += lrate * db
 
-    def batch_fit(self, texts, nb_epoch=1, lrate=.1, sampling=True, batch_size=5, **kwargs):
+    def batch_fit(self, texts, nb_epoch=1, lrate=.1, sampling=True, batch_size=8):
         self.init_values()
         x = T.fmatrix("x")
         y = T.bvector("y")
