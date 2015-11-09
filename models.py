@@ -8,7 +8,6 @@ from numpy import random, zeros, linalg
 from theano import tensor as T
 
 import sequence
-
 import text
 
 
@@ -22,9 +21,10 @@ class WordEmbeddingModel(object):
         self.biases = None
 
     def init_values(self):
-        self.wordvec_matrix = (random.randn(self.words_limit, self.dimension) - 0.5) / self.dimension
-        self.weight_matrix = zeros((self.words_limit, self.dimension))
-        self.biases = zeros(self.words_limit)
+        self.wordvec_matrix = (random.randn(self.words_limit, self.dimension).astype(
+            numpy.float32) - 0.5) / self.dimension
+        self.weight_matrix = zeros((self.words_limit, self.dimension), dtype=numpy.float32)
+        self.biases = zeros(self.words_limit, dtype=numpy.float32)
 
     def build_vocab(self, texts):
         self.tokenizer = text.Tokenizer(words_limit=self.words_limit)
@@ -89,15 +89,15 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
 
     def fit(self, texts, nb_epoch=1, lrate=.1, sampling=True, **kwargs):
         self.init_values()
-        x = T.dvector("x")
+        x = T.fvector("x")
         y = T.bscalar("y")
-        w = T.dvector("w")
-        b = T.dscalar("b")
+        w = T.fvector("w")
+        b = T.fscalar("b")
 
-        hx = 1 / (1 + T.exp(-T.dot(x, w) - b))
-        gx = (y - hx) * w
-        gw = (y - hx) * x
+        hx = 1 / (1 + T.exp(-T.dot(w, x) - b))
         gb = y - hx
+        gx = gb * w
+        gw = gb * x
 
         train = theano.function(
             inputs=[x, y, w, b],
@@ -108,6 +108,35 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                 for i, (wi, wj) in enumerate(couples):
                     dx, dw, db = train(self.wordvec_matrix[wi],
                                        labels[i],
+                                       self.weight_matrix[wj],
+                                       self.biases[wj])
+                    self.wordvec_matrix[wi] += lrate * dx
+                    self.weight_matrix[wj] += lrate * dw
+                    self.biases[wj] += lrate * db
+
+    def batch_fit(self, texts, nb_epoch=1, lrate=.1, sampling=True, batch_size=5, **kwargs):
+        self.init_values()
+        x = T.fmatrix("x")
+        y = T.bvector("y")
+        w = T.fmatrix("w")
+        b = T.fvector("b")
+
+        hx = 1 / (1 + T.exp(-T.sum(w * x, axis=1) - b))
+        gb = y - hx
+        gx = T.transpose(gb * T.transpose(w))
+        gw = T.transpose(gb * T.transpose(x))
+
+        train = theano.function(
+            inputs=[x, y, w, b],
+            outputs=[gx, gw, gb])
+
+        for e in range(nb_epoch):
+            for couples, labels in self._sequentialize(texts, sampling):
+                n = len(couples)
+                for i in range(0, n, batch_size):
+                    wi, wj = numpy.array(zip(*couples[i:i + batch_size]))
+                    dx, dw, db = train(self.wordvec_matrix[wi],
+                                       labels[i:i + batch_size],
                                        self.weight_matrix[wj],
                                        self.biases[wj])
                     self.wordvec_matrix[wi] += lrate * dx
