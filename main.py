@@ -80,7 +80,7 @@ if __name__ == '__main__':
     else:
         print('start fitting model...')
         lc = file_lines(args.data)
-        model.batch_fit(text_generator(args.data, lc), sampling=True)
+        model.batch_fit_graph(text_generator(args.data, lc), sampling=True)
     print('\nfinish!')
 
     if args.output and not args.wordvec:

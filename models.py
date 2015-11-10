@@ -87,6 +87,33 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                                      negative_samples=self.neg_sample_rate,
                                      sampling_table=sampling_table)
 
+    def fit_graph(self, texts, nb_epoch=1, lrate=.1, sampling=True):
+        self.init_values()
+        x = T.fvector("x")
+        y = T.bscalar("y")
+        w = T.fvector("w")
+        b = T.fscalar("b")
+
+        hx = 1 / (1 + T.exp(-T.dot(w, x) - b))
+        obj = y*T.log(hx) + (1-y)*T.log(1-hx)
+
+        gx, gw, gb = T.grad(obj, [x, w, b])
+
+        train = theano.function(
+            inputs=[x, y, w, b],
+            outputs=[gx, gw, gb])
+
+        for e in range(nb_epoch):
+            for couples, labels in self._sequentialize(texts, sampling):
+                for i, (wi, wj) in enumerate(couples):
+                    dx, dw, db = train(self.wordvec_matrix[wi],
+                                       labels[i],
+                                       self.weight_matrix[wj],
+                                       self.biases[wj])
+                    self.wordvec_matrix[wi] += lrate * dx
+                    self.weight_matrix[wj] += lrate * dw
+                    self.biases[wj] += lrate * db
+
     def fit(self, texts, nb_epoch=1, lrate=.1, sampling=True, **kwargs):
         self.init_values()
         x = T.fvector("x")
@@ -125,6 +152,37 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
         gb = y - hx
         gx = T.transpose(gb * T.transpose(w))
         gw = T.transpose(gb * T.transpose(x))
+
+        train = theano.function(
+            inputs=[x, y, w, b],
+            outputs=[gx, gw, gb])
+
+        for e in range(nb_epoch):
+            for couples, labels in self._sequentialize(texts, sampling):
+                n = len(couples)
+                for i in range(0, n, batch_size):
+                    wi, wj = numpy.array(zip(*couples[i:i + batch_size]))
+                    dx, dw, db = train(self.wordvec_matrix[wi],
+                                       labels[i:i + batch_size],
+                                       self.weight_matrix[wj],
+                                       self.biases[wj])
+                    self.wordvec_matrix[wi] += lrate * dx
+                    self.weight_matrix[wj] += lrate * dw
+                    self.biases[wj] += lrate * db
+
+    def batch_fit_graph(self, texts, nb_epoch=1, lrate=.1, sampling=True, batch_size=5, **kwargs):
+        self.init_values()
+        x = T.fmatrix("x")
+        y = T.bvector("y")
+        w = T.fmatrix("w")
+        b = T.fvector("b")
+
+        hx = 1 / (1 + T.exp(-T.sum(w * x, axis=1) - b))
+        obj = y*T.log(hx) + (1-y)*T.log(1-hx)
+        cost = obj.mean()
+        gx, gw, gb = T.grad(cost, [x, w, b])
+
+        #get_cost = theano.function(inputs=[x,y,w,b], outputs=[cost])
 
         train = theano.function(
             inputs=[x, y, w, b],
