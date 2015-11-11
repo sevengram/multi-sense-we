@@ -20,7 +20,7 @@ def text_generator(path, total_lines=0):
                 remain_time = end_time - time.time()
                 end_time_str = datetime.datetime.fromtimestamp(int(end_time)).ctime()
                 sys.stdout.write(
-                    '%.2f%%, estimated remaining time: %d min, expected end time: %s\r' % (
+                    '%.2f%%, estimated remaining time: %d min, expected end time: %s\n' % (
                         percent * 100, int(remain_time / 60), end_time_str))
                 sys.stdout.flush()
             yield l
@@ -46,6 +46,7 @@ if __name__ == '__main__':
     parser.add_argument('--limit', metavar='LIMIT', help='Words limit', type=int, default=5000)
     parser.add_argument('--vocab', metavar='FILE', help='File to load vocab', type=str, required=False)
     parser.add_argument('--wordvec', metavar='FILE', help='File to load word vectors', type=str, required=False)
+    parser.add_argument('--weights', metavar='FILE', help='File to load weigths', type=str, required=False)
     parser.add_argument('--output', metavar='FILE', help='Path to save data', type=str, required=False)
     parser.add_argument("--test", help="Run a manual test after loading/training", action='store_true')
     args = parser.parse_args()
@@ -86,6 +87,10 @@ if __name__ == '__main__':
     if args.output and not args.wordvec:
         print('saving word vectors...')
         model.save_word_vectors(build_filepath(args.output, 'word_vec'))
+
+    if args.output and not args.weigths:
+        print('saving weights...')
+        model.save_weight_matrix(build_filepath(args.output, 'weights'))
 
     print('end time: %s' % time.ctime())
     print('you may reload the vocab and model, and add --test to run a manual test.')
