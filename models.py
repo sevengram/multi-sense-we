@@ -58,7 +58,7 @@ class WordEmbeddingModel(object):
         if path:
             cPickle.dump(self.weight_matrix, open(path, "wb"))
 
-    def fit(self, texts, nb_epoch=1, **kwargs):
+    def fit(self, texts, nb_epoch=1, monitor=None, **kwargs):
         raise NotImplementedError()
 
     def _sequentialize(self, texts, **kwargs):
@@ -91,61 +91,7 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                                      negative_samples=self.neg_sample_rate,
                                      sampling_table=sampling_table)
 
-    def fit_graph(self, texts, nb_epoch=1, lrate=.1, sampling=True):
-        self.init_values()
-        x = T.fvector("x")
-        y = T.bscalar("y")
-        w = T.fvector("w")
-        b = T.fscalar("b")
-
-        hx = 1 / (1 + T.exp(-T.dot(w, x) - b))
-        obj = y*T.log(hx) + (1-y)*T.log(1-hx)
-
-        gx, gw, gb = T.grad(obj, [x, w, b])
-
-        train = theano.function(
-            inputs=[x, y, w, b],
-            outputs=[gx, gw, gb])
-
-        for e in range(nb_epoch):
-            for couples, labels in self._sequentialize(texts, sampling):
-                for i, (wi, wj) in enumerate(couples):
-                    dx, dw, db = train(self.wordvec_matrix[wi],
-                                       labels[i],
-                                       self.weight_matrix[wj],
-                                       self.biases[wj])
-                    self.wordvec_matrix[wi] += lrate * dx
-                    self.weight_matrix[wj] += lrate * dw
-                    self.biases[wj] += lrate * db
-
-    def fit(self, texts, nb_epoch=1, lrate=.1, sampling=True, **kwargs):
-        self.init_values()
-        x = T.fvector("x")
-        y = T.bscalar("y")
-        w = T.fvector("w")
-        b = T.fscalar("b")
-
-        hx = 1 / (1 + T.exp(-T.dot(w, x) - b))
-        gb = y - hx
-        gx = gb * w
-        gw = gb * x
-
-        train = theano.function(
-            inputs=[x, y, w, b],
-            outputs=[gx, gw, gb])
-
-        for e in range(nb_epoch):
-            for couples, labels in self._sequentialize(texts, sampling):
-                for i, (wi, wj) in enumerate(couples):
-                    dx, dw, db = train(self.wordvec_matrix[wi],
-                                       labels[i],
-                                       self.weight_matrix[wj],
-                                       self.biases[wj])
-                    self.wordvec_matrix[wi] += lrate * dx
-                    self.weight_matrix[wj] += lrate * dw
-                    self.biases[wj] += lrate * db
-
-    def batch_fit(self, texts, nb_epoch=1, lrate=.1, sampling=True, batch_size=5, **kwargs):
+    def fit(self, texts, nb_epoch=1, monitor=None, lrate=.1, sampling=True, batch_size=8, **kwargs):
         self.init_values()
         x = T.fmatrix("x")
         y = T.bvector("y")
@@ -153,65 +99,34 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
         b = T.fvector("b")
 
         hx = 1 / (1 + T.exp(-T.sum(w * x, axis=1) - b))
-        obj = y*T.log(hx) + (1-y)*T.log(1-hx)
-        avg_obj = T.mean(obj)
         gb = y - hx
         gx = T.transpose(gb * T.transpose(w))
         gw = T.transpose(gb * T.transpose(x))
-
-        get_obj = theano.function(inputs=[x, y, w, b], outputs=[avg_obj])
-
-        train = theano.function(
+        gradient = theano.function(
             inputs=[x, y, w, b],
             outputs=[gx, gw, gb])
 
-        for e in range(nb_epoch):
-            c = 0
-            for couples, labels in self._sequentialize(texts, sampling):
-                n = len(couples)
-                for i in range(0, n, batch_size):
-                    wi, wj = numpy.array(zip(*couples[i:i + batch_size]))
-                    dx, dw, db = train(self.wordvec_matrix[wi],
-                                       labels[i:i + batch_size],
-                                       self.weight_matrix[wj],
-                                       self.biases[wj])
-                    self.wordvec_matrix[wi] += lrate * dx
-                    self.weight_matrix[wj] += lrate * dw
-                    self.biases[wj] += lrate * db
-                if c % 20 == 0 and c != 0:
-                    X = numpy.array(couples, dtype="int32")
-                    avg_obj = get_obj(self.wordvec_matrix[X[:, 0]],
-                                      labels,
-                                      self.weight_matrix[X[:, 1]],
-                                      self.biases[X[:, 1]])
-                    print "average objective value: ", avg_obj[0]
-                c += 1
-
-    def batch_fit_graph(self, texts, nb_epoch=1, lrate=.1, sampling=True, batch_size=5, **kwargs):
-        self.init_values()
-        x = T.fmatrix("x")
-        y = T.bvector("y")
-        w = T.fmatrix("w")
-        b = T.fvector("b")
-
-        hx = 1 / (1 + T.exp(-T.sum(w * x, axis=1) - b))
-        obj = y*T.log(hx) + (1-y)*T.log(1-hx)
-        cost = T.sum(obj)
-        gx, gw, gb = T.grad(cost, [x, w, b])
-
-        train = theano.function(
+        obj = y * T.log(hx) + (1 - y) * T.log(1 - hx)
+        objval = theano.function(
             inputs=[x, y, w, b],
-            outputs=[gx, gw, gb])
+            outputs=T.mean(obj))
 
         for e in range(nb_epoch):
-            for couples, labels in self._sequentialize(texts, sampling):
+            for k, (couples, labels) in enumerate(self._sequentialize(texts, sampling)):
                 n = len(couples)
                 for i in range(0, n, batch_size):
                     wi, wj = numpy.array(zip(*couples[i:i + batch_size]))
-                    dx, dw, db = train(self.wordvec_matrix[wi],
-                                       labels[i:i + batch_size],
-                                       self.weight_matrix[wj],
-                                       self.biases[wj])
+                    dx, dw, db = gradient(self.wordvec_matrix[wi],
+                                          labels[i:i + batch_size],
+                                          self.weight_matrix[wj],
+                                          self.biases[wj])
                     self.wordvec_matrix[wi] += lrate * dx
                     self.weight_matrix[wj] += lrate * dw
                     self.biases[wj] += lrate * db
+                if callable(monitor) and k % 20 == 0 and k != 0:
+                    c = numpy.array(couples)
+                    obj = objval(self.wordvec_matrix[c[:, 0]],
+                                 labels,
+                                 self.weight_matrix[c[:, 1]],
+                                 self.biases[c[:, 1]])
+                    monitor(k, obj)

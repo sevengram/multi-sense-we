@@ -9,20 +9,22 @@ import argparse
 from models import SkipGramNegSampEmbeddingModel
 
 
-def text_generator(path, total_lines=0):
-    start_time = time.time()
+def build_monitor(start_time, total_lines):
+    def m(index, objval):
+        percent = float(index) / total_lines
+        total_time = (time.time() - start_time) / percent
+        remain_time = start_time + total_time - time.time()
+        sys.stdout.write(
+            '%.2f%%, estimated remaining time: %d min, objective value: %f\r' % (
+                percent * 100, int(remain_time / 60), objval))
+        sys.stdout.flush()
+
+    return m
+
+
+def text_generator(path):
     with open(path) as f:
-        for i, l in enumerate(f):
-            if i % 20 == 0 and i != 0 and total_lines != 0:
-                percent = float(i) / total_lines
-                total_time = (time.time() - start_time) / percent
-                end_time = start_time + total_time
-                remain_time = end_time - time.time()
-                end_time_str = datetime.datetime.fromtimestamp(int(end_time)).ctime()
-                sys.stdout.write(
-                    '%.2f%%, estimated remaining time: %d min, expected end time: %s\n' % (
-                        percent * 100, int(remain_time / 60), end_time_str))
-                sys.stdout.flush()
+        for l in f:
             yield l
 
 
@@ -46,8 +48,10 @@ if __name__ == '__main__':
     parser.add_argument('--limit', metavar='LIMIT', help='Words limit', type=int, default=5000)
     parser.add_argument('--vocab', metavar='FILE', help='File to load vocab', type=str, required=False)
     parser.add_argument('--wordvec', metavar='FILE', help='File to load word vectors', type=str, required=False)
-    parser.add_argument('--weights', metavar='FILE', help='File to load weigths', type=str, required=False)
     parser.add_argument('--output', metavar='FILE', help='Path to save data', type=str, required=False)
+    parser.add_argument('--batch', metavar='SIZE', help='Batch size', type=int, default=8)
+    parser.add_argument('--epoch', metavar='COUNT', help='Epoch count', type=int, default=1)
+    parser.add_argument('--lrate', metavar='RATE', help='Learning rate', type=float, default=.1)
     parser.add_argument("--test", help="Run a manual test after loading/training", action='store_true')
     args = parser.parse_args()
 
@@ -61,7 +65,8 @@ if __name__ == '__main__':
         print('invalid word vector input')
 
     print('start time: %s' % time.ctime())
-    print('words_limit=%d, dimension=%d, window_size=%d' % (model.words_limit, model.dimension, model.window_size))
+    print('words_limit=%d, dimension=%d, window_size=%d, batch_size=%d' % (
+        model.words_limit, model.dimension, model.window_size, args.batch))
 
     print('start loading vocab...')
     if args.vocab:
@@ -80,16 +85,13 @@ if __name__ == '__main__':
         model.load_word_vectors(args.wordvec)
     else:
         print('start fitting model...')
-        lc = file_lines(args.data)
-        model.batch_fit(text_generator(args.data, lc), sampling=True)
+        model.fit(text_generator(args.data), lrate=args.lrate, sampling=True, batch_size=args.batch,
+                  monitor=build_monitor(time.time(), file_lines(args.data)))
     print('\nfinish!')
 
     if args.output and not args.wordvec:
         print('saving word vectors...')
         model.save_word_vectors(build_filepath(args.output, 'word_vec'))
-
-    if args.output and not args.weigths:
-        print('saving weights...')
         model.save_weight_matrix(build_filepath(args.output, 'weights'))
 
     print('end time: %s' % time.ctime())
