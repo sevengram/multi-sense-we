@@ -54,6 +54,10 @@ class WordEmbeddingModel(object):
         if path:
             cPickle.dump(self.wordvec_matrix, open(path, "wb"))
 
+    def save_weight_matrix(self, path):
+        if path:
+            cPickle.dump(self.weight_matrix, open(path, "wb"))
+
     def fit(self, texts, nb_epoch=1, **kwargs):
         raise NotImplementedError()
 
@@ -149,15 +153,20 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
         b = T.fvector("b")
 
         hx = 1 / (1 + T.exp(-T.sum(w * x, axis=1) - b))
+        obj = y*T.log(hx) + (1-y)*T.log(1-hx)
+        avg_obj = T.mean(obj)
         gb = y - hx
         gx = T.transpose(gb * T.transpose(w))
         gw = T.transpose(gb * T.transpose(x))
+
+        get_obj = theano.function(inputs=[x, y, w, b], outputs=[avg_obj])
 
         train = theano.function(
             inputs=[x, y, w, b],
             outputs=[gx, gw, gb])
 
         for e in range(nb_epoch):
+            c = 0
             for couples, labels in self._sequentialize(texts, sampling):
                 n = len(couples)
                 for i in range(0, n, batch_size):
@@ -169,6 +178,14 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                     self.wordvec_matrix[wi] += lrate * dx
                     self.weight_matrix[wj] += lrate * dw
                     self.biases[wj] += lrate * db
+                if c % 20 == 0 and c != 0:
+                    X = numpy.array(couples, dtype="int32")
+                    avg_obj = get_obj(self.wordvec_matrix[X[:, 0]],
+                                      labels,
+                                      self.weight_matrix[X[:, 1]],
+                                      self.biases[X[:, 1]])
+                    print "average objective value: ", avg_obj[0]
+                c += 1
 
     def batch_fit_graph(self, texts, nb_epoch=1, lrate=.1, sampling=True, batch_size=5, **kwargs):
         self.init_values()
@@ -179,10 +196,8 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
 
         hx = 1 / (1 + T.exp(-T.sum(w * x, axis=1) - b))
         obj = y*T.log(hx) + (1-y)*T.log(1-hx)
-        cost = obj.mean()
+        cost = T.sum(obj)
         gx, gw, gb = T.grad(cost, [x, w, b])
-
-        #get_cost = theano.function(inputs=[x,y,w,b], outputs=[cost])
 
         train = theano.function(
             inputs=[x, y, w, b],
