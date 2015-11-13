@@ -27,8 +27,7 @@ def make_sampling_table(size, sampling_factor=1e-5):
     return numpy.minimum(1., f / numpy.sqrt(f))
 
 
-def skipgrams(sequence, vocabulary_size, window_size=4, negative_samples=1., shuffle=True, categorical=False,
-              sampling_table=None):
+def skipgrams(sequence, vocabulary_size, window_size=4, negative_samples=1., shuffle=True, sampling_table=None):
     """ 
         Take a sequence (list of indexes of words), 
         returns couples of [word_index, other_word index] and labels (1s or 0s),
@@ -38,13 +37,12 @@ def skipgrams(sequence, vocabulary_size, window_size=4, negative_samples=1., shu
         @param vocabulary_size: int. maximum possible word index + 1
         @param window_size: int. actually half-window. The window of a word wi will be [i-window_size, i+window_size+1]
         @param negative_samples: float >= 0. 0 for no negative (=random) samples. 1 for same number as positive samples.
-        @param categorical: bool. if False, labels will be integers (eg. [0, 1, 1 .. ]), 
-            if True labels will be categorical eg. [[1,0],[0,1],[0,1] .. ]
 
         Note: by convention, index 0 in the vocabulary is a non-word and will be skipped.
     """
     couples = []
     labels = []
+    seq_indices = []
     for i, wi in enumerate(sequence):
         if not wi:
             continue
@@ -60,27 +58,24 @@ def skipgrams(sequence, vocabulary_size, window_size=4, negative_samples=1., shu
                 if not wj:
                     continue
                 couples.append([wi, wj])
-                if categorical:
-                    labels.append([0, 1])
-                else:
-                    labels.append(1)
+                seq_indices.append(i)
+                labels.append(1)
 
     if negative_samples > 0:
         nb_negative_samples = int(len(labels) * negative_samples)
         words = [c[0] for c in couples]
         random.shuffle(words)
-
         couples += [[words[i % len(words)], random.randint(1, vocabulary_size - 1)] for i in range(nb_negative_samples)]
-        if categorical:
-            labels += [[1, 0]] * nb_negative_samples
-        else:
-            labels += [0] * nb_negative_samples
+        seq_indices += [i % len(words) for i in range(nb_negative_samples)]
+        labels += [0] * nb_negative_samples
 
     if shuffle:
-        seed = random.randint(0, 10e6)
+        seed = random.randint()
         random.seed(seed)
         random.shuffle(couples)
         random.seed(seed)
         random.shuffle(labels)
+        random.seed(seed)
+        random.shuffle(seq_indices)
 
     return couples, labels

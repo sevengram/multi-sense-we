@@ -47,8 +47,9 @@ class WordEmbeddingModel(object):
             cPickle.dump(self.tokenizer.word_list, open(path, "wb"))
 
     def save_word_index(self, path):
+        word_index = {k: [v] for k, v in self.tokenizer.word_index.iteritems()}
         if path:
-            cPickle.dump(self.tokenizer.word_index, open(path, "wb"))
+            cPickle.dump(word_index, open(path, "wb"))
 
     def save_word_vectors(self, path):
         if path:
