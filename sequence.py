@@ -70,7 +70,7 @@ def skipgrams(sequence, vocabulary_size, window_size=4, negative_samples=1., shu
         labels += [0] * nb_negative_samples
 
     if shuffle:
-        seed = random.randint()
+        seed = random.randint(0, 10e6)
         random.seed(seed)
         random.shuffle(couples)
         random.seed(seed)
