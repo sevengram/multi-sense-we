@@ -78,4 +78,4 @@ def skipgrams(sequence, vocabulary_size, window_size=4, negative_samples=1., shu
         random.seed(seed)
         random.shuffle(seq_indices)
 
-    return couples, labels
+    return couples, labels, seq_indices

@@ -16,24 +16,25 @@ class WordEmbeddingModel(object):
         self.words_limit = words_limit
         self.dimension = dimension
         self.tokenizer = None
+        self.word_matrix_index = None
         self.wordvec_matrix = None
         self.weight_matrix = None
         self.biases = None
-
-    def init_values(self):
-        self.wordvec_matrix = (random.randn(self.words_limit, self.dimension).astype(
-            numpy.float32) - 0.5) / self.dimension
-        self.weight_matrix = zeros((self.words_limit, self.dimension), dtype=numpy.float32)
-        self.biases = zeros(self.words_limit, dtype=numpy.float32)
 
     def build_vocab(self, texts):
         self.tokenizer = text.Tokenizer(words_limit=self.words_limit)
         self.tokenizer.fit_on_texts(texts)
         self.words_limit = min(self.words_limit, len(self.tokenizer.word_counts))
+        self._build_word_matrix_index()
 
     def load_vocab(self, path):
         self.tokenizer = cPickle.load(open(path, 'rb'))
         self.words_limit = min(self.words_limit, len(self.tokenizer.word_counts))
+        self._build_word_matrix_index()
+
+    def _build_word_matrix_index(self):
+        for i in range(self.words_limit):
+            self.word_matrix_index[self.tokenizer.word_list[i]] = [i]
 
     def load_word_vectors(self, path):
         self.wordvec_matrix = cPickle.load(open(path, 'rb'))
@@ -47,9 +48,8 @@ class WordEmbeddingModel(object):
             cPickle.dump(self.tokenizer.word_list, open(path, "wb"))
 
     def save_word_index(self, path):
-        word_index = {k: [v] for k, v in self.tokenizer.word_index.iteritems()}
         if path:
-            cPickle.dump(word_index, open(path, "wb"))
+            cPickle.dump(self.word_matrix_index, open(path, "wb"))
 
     def save_word_vectors(self, path):
         if path:
@@ -80,20 +80,32 @@ class WordEmbeddingModel(object):
 
 
 class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
-    def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1.):
+    def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1., space_factor=4):
         super(SkipGramNegSampEmbeddingModel, self).__init__(words_limit, dimension)
         self.neg_sample_rate = neg_sample_rate
         self.window_size = window_size
+        self.space_factor = space_factor
+        self.word_sampling_count = None
+        self.cluster_center_matrix = None
+
+    def _init_values(self):
+        factor = self.space_factor
+        self.word_sampling_count = zeros(self.words_limit * factor, dtype=numpy.float32)
+        self.wordvec_matrix = (random.randn(self.words_limit * factor, self.dimension).astype(
+            numpy.float32) - 0.5) / self.dimension
+        self.weight_matrix = zeros((self.words_limit * factor, self.dimension), dtype=numpy.float32)
+        self.cluster_center_matrix = zeros((self.words_limit * factor, self.dimension), dtype=numpy.float32)
+        self.biases = zeros(self.words_limit * factor, dtype=numpy.float32)
 
     def _sequentialize(self, texts, sampling=True, **kwargs):
         sampling_table = sequence.make_sampling_table(self.words_limit) if sampling else None
         for seq in self.tokenizer.texts_to_sequences_generator(texts):
-            yield sequence.skipgrams(seq, self.words_limit, window_size=self.window_size,
-                                     negative_samples=self.neg_sample_rate,
-                                     sampling_table=sampling_table)
+            yield seq, sequence.skipgrams(seq, self.words_limit, window_size=self.window_size,
+                                          negative_samples=self.neg_sample_rate,
+                                          sampling_table=sampling_table)
 
     def fit(self, texts, nb_epoch=1, monitor=None, lrate=.1, sampling=True, batch_size=8, **kwargs):
-        self.init_values()
+        self._init_values()
         x = T.fmatrix("x")
         y = T.bvector("y")
         w = T.fmatrix("w")
@@ -113,7 +125,7 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
             outputs=T.mean(obj))
 
         for e in range(nb_epoch):
-            for k, (couples, labels) in enumerate(self._sequentialize(texts, sampling)):
+            for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 n = len(couples)
                 for i in range(0, n, batch_size):
                     wi, wj = numpy.array(zip(*couples[i:i + batch_size]))
