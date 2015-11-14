@@ -12,14 +12,22 @@ import text
 
 
 class WordEmbeddingModel(object):
-    def __init__(self, words_limit=5000, dimension=128):
+    def __init__(self, words_limit=5000, dimension=128, space_factor=1):
         self.words_limit = words_limit
         self.dimension = dimension
+        self.space_factor = space_factor
         self.tokenizer = None
-        self.word_matrix_index = None
+        self.word_matrix_index = {}
         self.wordvec_matrix = None
         self.weight_matrix = None
         self.biases = None
+
+    def _init_values(self):
+        factor = self.space_factor
+        self.wordvec_matrix = (random.randn(self.words_limit * factor, self.dimension).astype(
+            numpy.float32) - 0.5) / self.dimension
+        self.weight_matrix = zeros((self.words_limit * factor, self.dimension), dtype=numpy.float32)
+        self.biases = zeros(self.words_limit * factor, dtype=numpy.float32)
 
     def build_vocab(self, texts):
         self.tokenizer = text.Tokenizer(words_limit=self.words_limit)
@@ -80,22 +88,15 @@ class WordEmbeddingModel(object):
 
 
 class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
-    def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1., space_factor=4):
-        super(SkipGramNegSampEmbeddingModel, self).__init__(words_limit, dimension)
-        self.neg_sample_rate = neg_sample_rate
+    def __init__(self, words_limit=5000, dimension=128, space_factor=1, window_size=5, neg_sample_rate=1.):
+        super(SkipGramNegSampEmbeddingModel, self).__init__(words_limit, dimension, space_factor)
         self.window_size = window_size
-        self.space_factor = space_factor
+        self.neg_sample_rate = neg_sample_rate
         self.word_sampling_count = None
-        self.cluster_center_matrix = None
 
     def _init_values(self):
-        factor = self.space_factor
-        self.word_sampling_count = zeros(self.words_limit * factor, dtype=numpy.float32)
-        self.wordvec_matrix = (random.randn(self.words_limit * factor, self.dimension).astype(
-            numpy.float32) - 0.5) / self.dimension
-        self.weight_matrix = zeros((self.words_limit * factor, self.dimension), dtype=numpy.float32)
-        self.cluster_center_matrix = zeros((self.words_limit * factor, self.dimension), dtype=numpy.float32)
-        self.biases = zeros(self.words_limit * factor, dtype=numpy.float32)
+        super(SkipGramNegSampEmbeddingModel, self)._init_values()
+        self.word_sampling_count = zeros(self.words_limit * self.space_factor, dtype=numpy.float32)
 
     def _sequentialize(self, texts, sampling=True, **kwargs):
         sampling_table = sequence.make_sampling_table(self.words_limit) if sampling else None
@@ -143,3 +144,21 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                                  self.weight_matrix[c[:, 1]],
                                  self.biases[c[:, 1]])
                     monitor(k, obj)
+
+
+class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
+    def __init__(self, words_limit=5000, dimension=128, space_factor=4, window_size=5, neg_sample_rate=1.):
+        super(ClusteringSgNsEmbeddingModel, self).__init__(words_limit, dimension, space_factor, window_size,
+                                                           neg_sample_rate)
+        self.cluster_center_matrix = None
+
+    def _init_values(self):
+        super(ClusteringSgNsEmbeddingModel, self)._init_values()
+        self.cluster_center_matrix = zeros((self.words_limit * self.space_factor, self.dimension), dtype=numpy.float32)
+
+    def clustering(self, seq, seq_indices):
+        # TODO
+        pass
+
+    def cluster_center(self, context_words_indices):
+        return numpy.mean(self.weight_matrix[context_words_indices], axis=0)

@@ -6,7 +6,7 @@ import time
 import datetime
 import argparse
 
-from models import SkipGramNegSampEmbeddingModel
+from models import ClusteringSgNsEmbeddingModel
 
 
 def build_monitor(start_time, total_lines):
@@ -58,7 +58,7 @@ if __name__ == '__main__':
     if args.output and not os.path.exists(args.output):
         os.makedirs(args.output)
 
-    model = SkipGramNegSampEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window)
+    model = ClusteringSgNsEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window)
     if not args.vocab and not args.data:
         print('invalid vocab input')
     if not args.wordvec and not args.data:
