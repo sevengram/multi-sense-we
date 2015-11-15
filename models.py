@@ -22,6 +22,7 @@ class WordEmbeddingModel(object):
         self.wordvec_matrix = None
         self.weight_matrix = None
         self.biases = None
+        self.descend_traj = []
 
     def _init_values(self):
         factor = self.space_factor
@@ -68,6 +69,10 @@ class WordEmbeddingModel(object):
         if path:
             cPickle.dump(self.weight_matrix, open(path, "wb"))
 
+    def save_descend_traj(self, path):
+        if path:
+            cPickle.dump(self.descend_traj, open(path, "wb"))
+
     def fit(self, texts, nb_epoch=1, monitor=None, **kwargs):
         raise NotImplementedError()
 
@@ -106,7 +111,7 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                                           negative_samples=self.neg_sample_rate,
                                           sampling_table=sampling_table)
 
-    def fit(self, texts, nb_epoch=1, monitor=None, lrate=.1, sampling=True, batch_size=8, **kwargs):
+    def fit(self, texts, nb_epoch=1, monitor=None, lr=.1, sampling=True, batch_size=8, **kwargs):
         self._init_values()
         x = T.fmatrix("x")
         y = T.bvector("y")
@@ -129,24 +134,25 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
         for e in range(nb_epoch):
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 n = len(couples)
-                for i in range(0, n, batch_size):
-                    wi, wj = numpy.array(zip(*couples[i:i + batch_size]))
-                    dx, dw, db = gradient(self.wordvec_matrix[wi],
-                                          labels[i:i + batch_size],
-                                          self.weight_matrix[wj],
-                                          self.biases[wj])
-                    self.wordvec_matrix[wi] += lrate * dx
-                    self.weight_matrix[wj] += lrate * dw
-                    self.biases[wj] += lrate * db
-                if callable(monitor) and k % 20 == 0 and k != 0:
+                if callable(monitor) and k % 20 == 0:
                     c = numpy.array(couples)
                     obj = objval(self.wordvec_matrix[c[:, 0]],
                                  labels,
                                  self.weight_matrix[c[:, 1]],
                                  self.biases[c[:, 1]])
                     monitor(k, obj)
+                for i in range(0, n, batch_size):
+                    wi, wj = numpy.array(zip(*couples[i:i + batch_size]))
+                    dx, dw, db = gradient(self.wordvec_matrix[wi],
+                                          labels[i:i + batch_size],
+                                          self.weight_matrix[wj],
+                                          self.biases[wj])
+                    self.wordvec_matrix[wi] += lr * dx
+                    self.weight_matrix[wj] += lr * dw
+                    self.biases[wj] += lr * db
 
-    def fit_bis(self, texts, nb_epoch=1, monitor=None, sampling=True, lr=.1, momentum=0.0, batch_size=4, epsilon=1e-6,
+    def fit_bis(self, texts, nb_epoch=1, monitor=None, sampling=True, lr=.1, lr_b=None,
+                momentum=0.0, momentum_b=None, batch_size=4, epsilon=1e-6,
                 optimizer='sgd', **kwargs):
         self._init_values()
         x = T.fmatrix("x")
@@ -162,27 +168,30 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
             outputs=obj_mean)
 
         if optimizer == 'sgd':
-            trainer = SGD(lr=lr, momentum=momentum)
+            trainer = SGD(lr=lr, lr_b=lr, momentum=momentum, momentum_b=momentum_b)
         elif optimizer == 'adagrad':
-            trainer = AdaGrad(lr=lr, epsilon=epsilon)
+            trainer = AdaGrad(lr=lr, lr_b=lr_b, epsilon=epsilon, gx_shape=(batch_size, self.dimension),
+                              gw_shape=(batch_size, self.dimension), gb_shape=batch_size)
         else:
             raise NotImplementedError()
-        gradient = trainer.compile(x, w, b, y, obj_mean)
+        update_funcs = trainer.compile(x, w, b, y, hx)
 
         for e in range(nb_epoch):
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
-                n = len(couples)
-                for i in range(0, n, batch_size):
-                    wi, wj = numpy.array(zip(*couples[i:i + batch_size]))
-                    trainer.update(wi, wj, self.wordvec_matrix, labels[i:i + batch_size],
-                                   self.weight_matrix, self.biases, gradient)
-                if callable(monitor) and k % 20 == 0 and k != 0:
+                if callable(monitor) and k % 20 == 0:
                     c = numpy.array(couples)
                     obj = objval(self.wordvec_matrix[c[:, 0]],
                                  labels,
                                  self.weight_matrix[c[:, 1]],
                                  self.biases[c[:, 1]])
+                    self.descend_traj.append(obj)
                     monitor(k, obj)
+                n = len(couples)
+                for i in range(0, n - batch_size, batch_size):
+                    wi, wj = numpy.array(zip(*couples[i:i + batch_size]))
+                    trainer.update(wi, wj, self.wordvec_matrix, labels[i:i + batch_size],
+                                   self.weight_matrix, self.biases, update_funcs)
+
 
 
 class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):

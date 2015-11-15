@@ -1,5 +1,7 @@
 import theano
+import numpy
 from theano import tensor as T
+from numpy import zeros, ones
 
 
 class Trainer(object):
@@ -26,8 +28,11 @@ class SGD(Trainer):
             self.momentum_b = momentum
         self.momentum = momentum
 
-    def compile(self, x, w, b, y, obj_func):
-        gx, gw, gb = T.grad(obj_func, [x, w, b])
+    def compile(self, x, w, b, y, hx):
+        gb = y - hx
+        gx = T.transpose(gb * T.transpose(w))
+        gw = T.transpose(gb * T.transpose(x))
+
         gradients = theano.function(
             inputs=[x, y, w, b],
             outputs=[gx, gw, gb])
@@ -45,14 +50,44 @@ class SGD(Trainer):
 
 
 class AdaGrad(Trainer):
-    def __init__(self, lr=.1, lr_b=None, epsilon=1e-6):
+    def __init__(self, lr=.1, lr_b=None, epsilon=1e-5, gx_shape=None, gw_shape=None, gb_shape=None):
         super(AdaGrad, self).__init__(lr, lr_b)
-        self.epsilon = epsilon
+        self.epsilon = numpy.array(epsilon, dtype=numpy.float32)
+        self.acc_gx = zeros(gx_shape, dtype=numpy.float32)
+        self.acc_gw = zeros(gw_shape, dtype=numpy.float32)
+        self.acc_gb = zeros(gb_shape, dtype=numpy.float32)
 
-    def compile(self, x, w, b, y, obj_func):
-        #TODO
-        pass
+    def compile(self, x, w, b, y, hx):
+        acc_x = T.fmatrix('acc_x')
+        acc_w = T.fmatrix('acc_w')
+        acc_b = T.fvector('acc_b')
 
-    def update(self, wi, wj, embeds, labels, weights, bias, gradients):
-        #TODO
-        pass
+        gb = y - hx
+        gx = T.transpose(gb * T.transpose(w))
+        gw = T.transpose(gb * T.transpose(x))
+
+        acc_nx = acc_x + gx**2
+        acc_nw = acc_w + gw**2
+        acc_nb = acc_b + gb**2
+
+        gx_new = gx/T.sqrt(acc_x + self.epsilon)
+        gw_new = gw/T.sqrt(acc_w + self.epsilon)
+        gb_new = gb/T.sqrt(acc_b + self.epsilon)
+
+        gradients = theano.function(inputs=[acc_x, acc_w, acc_b, x, y, w, b], outputs=[gx_new, gw_new, gb_new])
+        accumulator = theano.function(inputs=[acc_x, acc_w, acc_b, x, y, w, b], outputs=[acc_nx, acc_nw, acc_nb])
+
+        return [gradients, accumulator]
+
+    def update(self, wi, wj, embeds, labels, weights, bias, update_funcs):
+        gradients = update_funcs[0]
+        accumulator = update_funcs[1]
+
+        self.acc_gx, self.acc_gw, self.acc_gb = accumulator(self.acc_gx, self.acc_gw, self.acc_gb,
+                                                            embeds[wi], labels, weights[wj], bias[wj])
+        dx, dw, db = gradients(self.acc_gx, self.acc_gw, self.acc_gb,
+                               embeds[wi], labels, weights[wj], bias[wj])
+
+        embeds[wi] += self.lr * dx
+        weights[wj] += self.lr * dw
+        bias[wj] += self.lr_b * db
