@@ -9,66 +9,7 @@ from theano import tensor as T
 
 import sequence
 import text
-
-
-class Training(object):
-    def __init__(self, lr=.1, momentum=0.0, epsilon=1e-6, optimizer='sgd', lr_b=None, momentum_b=None):
-        self.lr = lr
-        if lr_b is not None:
-            self.lr_b = lr_b
-        else:
-            self.lr_b = lr
-        if momentum_b is not None:
-            self.momentum_b = momentum_b
-        else:
-            self.momentum_b = momentum
-        self.momentum = momentum
-        self.epsilon_ada = epsilon
-        self.optimizer = optimizer
-
-    def compile(self, x, w, b, y, obj_func):
-        if self.optimizer == 'sgd':
-            return self.SGD_compile(x, w, b, y, obj_func)
-        elif self.optimizer == 'adagrad':
-            return self.Adagrad_compile(x, w, b, y, obj_func)
-        else:
-            raise NotImplementedError
-
-    def update(self, embeds, labels, weights, bias, gradients):
-        if self.optimizer == 'sgd':
-            embeds, weights, bias = self.SGD_update(embeds, labels, weights, bias, gradients)
-            return embeds, weights, bias
-        elif self.optimizer == 'adagrad':
-            self.Adgrad_update(embeds, labels, weights, bias, gradients)
-        else:
-            raise NotImplementedError
-
-    def SGD_compile(self, x, w, b, y, obj_func):
-        gx, gw, gb = T.grad(obj_func, [x, w, b])
-        gradients = theano.function(
-            inputs=[x, y, w, b],
-            outputs=[gx, gw, gb])
-        return gradients
-
-    def SGD_update(self, embeds, labels, weights, bias, gradients):
-        dx, dw, db = gradients(embeds, labels, weights, bias)
-        update_x = (1.0 - self.momentum) * self.lr * dx - self.momentum * embeds
-        update_w = (1.0 - self.momentum) * self.lr * dw - self.momentum * weights
-        update_b = (1.0 - self.momentum_b) * self.lr_b * db - self.momentum_b * bias
-
-        embeds += update_x
-        weights += update_w
-        bias += update_b
-
-        return embeds, weights, bias
-
-    def Adagrad_compile(self, x, w, b, y, obj_func):
-        # TODO
-        pass
-
-    def Adgrad_update(self, embeds, labels, weights, bias, gradients):
-        # TODO
-        pass
+from trainers import SGD, AdaGrad
 
 
 class WordEmbeddingModel(object):
@@ -205,7 +146,7 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                                  self.biases[c[:, 1]])
                     monitor(k, obj)
 
-    def fit_bis(self, texts, nb_epoch=1, monitor=None, sampling=True, lr=.1, momentum=0.0, batch_size=4,
+    def fit_bis(self, texts, nb_epoch=1, monitor=None, sampling=True, lr=.1, momentum=0.0, batch_size=4, epsilon=1e-6,
                 optimizer='sgd', **kwargs):
         self._init_values()
         x = T.fmatrix("x")
@@ -220,7 +161,12 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
             inputs=[x, y, w, b],
             outputs=obj_mean)
 
-        trainer = Training(lr=lr, momentum=momentum, optimizer=optimizer)
+        if optimizer == 'sgd':
+            trainer = SGD(lr=lr, momentum=momentum)
+        elif optimizer == 'adagrad':
+            trainer = AdaGrad(lr=lr, epsilon=epsilon)
+        else:
+            raise NotImplementedError()
         gradient = trainer.compile(x, w, b, y, obj_mean)
 
         for e in range(nb_epoch):
@@ -228,9 +174,8 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                 n = len(couples)
                 for i in range(0, n, batch_size):
                     wi, wj = numpy.array(zip(*couples[i:i + batch_size]))
-                    self.wordvec_matrix[wi], self.weight_matrix[wj], self.biases[wj] =\
-                        trainer.update(self.wordvec_matrix[wi], labels[i:i + batch_size],
-                                   self.weight_matrix[wj], self.biases[wj], gradient)
+                    trainer.update(wi, wj, self.wordvec_matrix, labels[i:i + batch_size],
+                                   self.weight_matrix, self.biases, gradient)
                 if callable(monitor) and k % 20 == 0 and k != 0:
                     c = numpy.array(couples)
                     obj = objval(self.wordvec_matrix[c[:, 0]],
