@@ -52,6 +52,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch', metavar='SIZE', help='Batch size', type=int, default=8)
     parser.add_argument('--epoch', metavar='COUNT', help='Epoch count', type=int, default=1)
     parser.add_argument('--lrate', metavar='RATE', help='Learning rate', type=float, default=.1)
+    parser.add_argument('--optimizer', metavar='FILE', help='Optimizer type', type=str, required=False)
     parser.add_argument("--test", help="Run a manual test after loading/training", action='store_true')
     args = parser.parse_args()
 
@@ -83,10 +84,14 @@ if __name__ == '__main__':
     if args.wordvec:
         print('start loading model...')
         model.load_word_vectors(args.wordvec)
-    else:
+    elif not args.optimizer:
         print('start fitting model...')
         model.fit(text_generator(args.data), lrate=args.lrate, sampling=True, batch_size=args.batch,
                   monitor=build_monitor(time.time(), file_lines(args.data)))
+    else:
+        print('start fitting model...')
+        model.fit_bis(text_generator(args.data), lrate=args.lrate, sampling=True, batch_size=args.batch,
+                      optimizer=args.optimizer, monitor=build_monitor(time.time(), file_lines(args.data)))
     print('\nfinish!')
 
     if args.output and not args.wordvec:
