@@ -24,7 +24,7 @@ def text_to_word_sequence(text, filters=base_filter(), lower=True, split=" "):
 class Tokenizer(object):
     def __init__(self, words_limit=None, filters=base_filter(), lower=True, split=" "):
         self.word_counts = {}
-        self.word_index = {}
+        self._word_index = {}
         self.word_list = []
         self.filters = filters
         self.split = split
@@ -46,7 +46,7 @@ class Tokenizer(object):
         wcounts = list(self.word_counts.items())
         wcounts.sort(key=lambda x: x[1], reverse=True)
         self.word_list = [wc[0] for wc in wcounts]
-        self.word_index = dict(zip(self.word_list, range(len(self.word_list))))
+        self._word_index = dict(zip(self.word_list, range(len(self.word_list))))
 
     def texts_to_sequences_generator(self, texts):
         """
@@ -60,7 +60,7 @@ class Tokenizer(object):
             seq = text_to_word_sequence(text, self.filters, self.lower, self.split)
             vect = []
             for w in seq:
-                i = self.word_index.get(w)
+                i = self._word_index.get(w)
                 if i is not None:
                     if self.words_limit and i >= self.words_limit:
                         pass
