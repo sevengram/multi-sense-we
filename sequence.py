@@ -64,9 +64,14 @@ def skipgrams(sequence, vocabulary_size, window_size=4, negative_samples=1., shu
     if negative_samples > 0:
         nb_negative_samples = int(len(labels) * negative_samples)
         words = [c[0] for c in couples]
+        indices = [d for d in seq_indices]
+        seed = random.randint(0, 10e6)
+        random.seed(seed)
         random.shuffle(words)
+        random.seed(seed)
+        random.shuffle(indices)
         couples += [[words[i % len(words)], random.randint(1, vocabulary_size - 1)] for i in range(nb_negative_samples)]
-        seq_indices += [i % len(words) for i in range(nb_negative_samples)]
+        seq_indices += [indices[i % len(words)] for i in range(nb_negative_samples)]
         labels += [0] * nb_negative_samples
 
     if shuffle:
