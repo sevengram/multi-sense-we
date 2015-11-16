@@ -11,7 +11,7 @@ from models import ClusteringSgNsEmbeddingModel
 
 def build_monitor(start_time, total_lines):
     def m(index, objval):
-        percent = float(index) / total_lines
+        percent = (float(index)+1.0) / total_lines
         total_time = (time.time() - start_time) / percent
         remain_time = start_time + total_time - time.time()
         sys.stdout.write(
@@ -51,7 +51,10 @@ if __name__ == '__main__':
     parser.add_argument('--output', metavar='FILE', help='Path to save data', type=str, required=False)
     parser.add_argument('--batch', metavar='SIZE', help='Batch size', type=int, default=8)
     parser.add_argument('--epoch', metavar='COUNT', help='Epoch count', type=int, default=1)
-    parser.add_argument('--lrate', metavar='RATE', help='Learning rate', type=float, default=.1)
+    parser.add_argument('--lr', metavar='RATE', help='Learning rate', type=float, default=.1)
+    parser.add_argument('--lr_b', metavar='RATE', help='Learning rate for bias', type=float, required=False)
+    parser.add_argument('--momentum', metavar='RATE', help='Momentum', type=float, default=.0)
+    parser.add_argument('--momentum_b', metavar='RATE', help='Momentum for bias', type=float, required=False)
     parser.add_argument('--optimizer', metavar='FILE', help='Optimizer type', type=str, required=False)
     parser.add_argument("--test", help="Run a manual test after loading/training", action='store_true')
     args = parser.parse_args()
@@ -86,14 +89,18 @@ if __name__ == '__main__':
         model.load_word_vectors(args.wordvec)
     elif not args.optimizer:
         print('start fitting model...')
-        model.fit(text_generator(args.data), lrate=args.lrate, sampling=True, batch_size=args.batch,
+        model.fit(text_generator(args.data), lr=args.lr, sampling=True, batch_size=args.batch,
                   monitor=build_monitor(time.time(), file_lines(args.data)))
     else:
         print('start fitting model...')
-        model.fit_bis(text_generator(args.data), lrate=args.lrate, sampling=True, batch_size=args.batch,
+        model.fit_bis(text_generator(args.data), lr=args.lr, lr_b=args.lr_b, momentum=args.momentum,
+                      momentum_b=args.momentum_b, sampling=True, batch_size=args.batch,
                       optimizer=args.optimizer, monitor=build_monitor(time.time(), file_lines(args.data)))
     print('\nfinish!')
 
+    if args.output:
+        print('saving the descend trajectory of objective value...')
+        model.save_descend_traj(build_filepath(args.output, 'obj'))
     if args.output and not args.wordvec:
         print('saving word vectors...')
         model.save_word_vectors(build_filepath(args.output, 'word_vec'))
