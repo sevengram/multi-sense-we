@@ -11,7 +11,8 @@ from models import ClusteringSgNsEmbeddingModel
 
 def build_monitor(start_time, total_lines):
     def m(index, objval):
-        percent = (float(index)+1.0) / total_lines
+        # TODO: record the history of objval here
+        percent = (float(index) + 1.0) / total_lines
         total_time = (time.time() - start_time) / percent
         remain_time = start_time + total_time - time.time()
         sys.stdout.write(
@@ -87,20 +88,12 @@ if __name__ == '__main__':
     if args.wordvec:
         print('start loading model...')
         model.load_word_vectors(args.wordvec)
-    elif not args.optimizer:
-        print('start fitting model...')
-        model.fit(text_generator(args.data), lr=args.lr, sampling=True, batch_size=args.batch,
-                  monitor=build_monitor(time.time(), file_lines(args.data)))
     else:
         print('start fitting model...')
-        model.fit_bis(text_generator(args.data), lr=args.lr, lr_b=args.lr_b, momentum=args.momentum,
-                      momentum_b=args.momentum_b, sampling=True, batch_size=args.batch,
-                      optimizer=args.optimizer, monitor=build_monitor(time.time(), file_lines(args.data)))
+        model.set_trainer()
+        model.fit(text_generator(args.data), monitor=build_monitor(time.time(), file_lines(args.data)))
     print('\nfinish!')
 
-    if args.output:
-        print('saving the descend trajectory of objective value...')
-        model.save_descend_traj(build_filepath(args.output, 'obj'))
     if args.output and not args.wordvec:
         print('saving word vectors...')
         model.save_word_vectors(build_filepath(args.output, 'word_vec'))

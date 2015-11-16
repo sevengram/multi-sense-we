@@ -3,7 +3,6 @@
 import cPickle
 
 import numpy
-import theano
 from numpy import random, zeros, linalg
 from theano import tensor as T
 
@@ -22,7 +21,6 @@ class WordEmbeddingModel(object):
         self.wordvec_matrix = None
         self.weight_matrix = None
         self.biases = None
-        self.descend_traj = []
 
     def _init_values(self):
         factor = self.space_factor
@@ -69,10 +67,6 @@ class WordEmbeddingModel(object):
         if path:
             cPickle.dump(self.weight_matrix, open(path, "wb"))
 
-    def save_descend_traj(self, path):
-        if path:
-            cPickle.dump(self.descend_traj, open(path, "wb"))
-
     def fit(self, texts, nb_epoch=1, monitor=None, **kwargs):
         raise NotImplementedError()
 
@@ -94,15 +88,13 @@ class WordEmbeddingModel(object):
 
 
 class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
-    def __init__(self, words_limit=5000, dimension=128, space_factor=1, window_size=5, neg_sample_rate=1.):
+    def __init__(self, words_limit=5000, dimension=128, space_factor=1, window_size=5, neg_sample_rate=1.,
+                 batch_size=4):
         super(SkipGramNegSampEmbeddingModel, self).__init__(words_limit, dimension, space_factor)
         self.window_size = window_size
+        self.batch_size = batch_size
         self.neg_sample_rate = neg_sample_rate
-        self.word_sampling_count = None
-
-    def _init_values(self):
-        super(SkipGramNegSampEmbeddingModel, self)._init_values()
-        self.word_sampling_count = zeros(self.words_limit * self.space_factor, dtype=numpy.float32)
+        self.trainer = None
 
     def _sequentialize(self, texts, sampling=True, **kwargs):
         sampling_table = sequence.make_sampling_table(self.words_limit) if sampling else None
@@ -111,87 +103,50 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                                           negative_samples=self.neg_sample_rate,
                                           sampling_table=sampling_table)
 
-    def fit(self, texts, nb_epoch=1, monitor=None, lr=.1, sampling=True, batch_size=8, **kwargs):
-        self._init_values()
+    def set_trainer(self, lr=.1, optimizer='sgd', **kwargs):
         x = T.fmatrix("x")
         y = T.bvector("y")
         w = T.fmatrix("w")
         b = T.fvector("b")
 
         hx = 1 / (1 + T.exp(-T.sum(w * x, axis=1) - b))
-        gb = y - hx
-        gx = T.transpose(gb * T.transpose(w))
-        gw = T.transpose(gb * T.transpose(x))
-        gradient = theano.function(
-            inputs=[x, y, w, b],
-            outputs=[gx, gw, gb])
-
-        obj = y * T.log(hx) + (1 - y) * T.log(1 - hx)
-        objval = theano.function(
-            inputs=[x, y, w, b],
-            outputs=T.mean(obj))
-
-        for e in range(nb_epoch):
-            for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
-                n = len(couples)
-                if callable(monitor) and k % 20 == 0:
-                    c = numpy.array(couples)
-                    obj = objval(self.wordvec_matrix[c[:, 0]],
-                                 labels,
-                                 self.weight_matrix[c[:, 1]],
-                                 self.biases[c[:, 1]])
-                    monitor(k, obj)
-                for i in range(0, n, batch_size):
-                    wi, wj = numpy.array(zip(*couples[i:i + batch_size]))
-                    dx, dw, db = gradient(self.wordvec_matrix[wi],
-                                          labels[i:i + batch_size],
-                                          self.weight_matrix[wj],
-                                          self.biases[wj])
-                    self.wordvec_matrix[wi] += lr * dx
-                    self.weight_matrix[wj] += lr * dw
-                    self.biases[wj] += lr * db
-
-    def fit_bis(self, texts, nb_epoch=1, monitor=None, sampling=True, lr=.1, lr_b=None,
-                momentum=0.0, momentum_b=None, batch_size=4, epsilon=1e-6,
-                optimizer='sgd', **kwargs):
-        self._init_values()
-        x = T.fmatrix("x")
-        y = T.bvector("y")
-        w = T.fmatrix("w")
-        b = T.fvector("b")
-
-        hx = 1 / (1 + T.exp(-T.sum(w * x, axis=1) - b))
-        obj = y * T.log(hx) + (1 - y) * T.log(1 - hx)
-        obj_mean = T.mean(obj)
-        objval = theano.function(
-            inputs=[x, y, w, b],
-            outputs=obj_mean)
+        # TODO: move objval function into trainer
+        # obj = y * T.log(hx) + (1 - y) * T.log(1 - hx)
+        # obj_mean = T.mean(obj)
+        # objval = theano.function(
+        #     inputs=[x, y, w, b],
+        #     outputs=obj_mean)
 
         if optimizer == 'sgd':
-            trainer = SGD(lr=lr, lr_b=lr, momentum=momentum, momentum_b=momentum_b)
+            self.trainer = SGD(lr=lr, lr_b=kwargs.get('lr_b'),
+                               momentum=kwargs.get('momentum', 0.0), momentum_b=kwargs.get('momentum_b'))
         elif optimizer == 'adagrad':
-            trainer = AdaGrad(lr=lr, lr_b=lr_b, epsilon=epsilon, gx_shape=(batch_size, self.dimension),
-                              gw_shape=(batch_size, self.dimension), gb_shape=batch_size)
+            self.trainer = AdaGrad(lr=lr, lr_b=kwargs.get('lr_b'),
+                                   epsilon=kwargs.get('epsilon', 1e-6),
+                                   gx_shape=(self.batch_size, self.dimension),
+                                   gw_shape=(self.batch_size, self.dimension),
+                                   gb_shape=self.batch_size)
         else:
             raise NotImplementedError()
-        update_funcs = trainer.compile(x, w, b, y, hx)
+        self.trainer.compile(x, w, b, y, hx)
 
+    def fit(self, texts, nb_epoch=1, monitor=None, sampling=True):
+        self._init_values()
         for e in range(nb_epoch):
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
-                if callable(monitor) and k % 20 == 0:
-                    c = numpy.array(couples)
-                    obj = objval(self.wordvec_matrix[c[:, 0]],
-                                 labels,
-                                 self.weight_matrix[c[:, 1]],
-                                 self.biases[c[:, 1]])
-                    self.descend_traj.append(obj)
-                    monitor(k, obj)
+                # TODO: get objval from trainer
+                # if callable(monitor) and k % 20 == 0:
+                #     c = numpy.array(couples)
+                #     obj = objval(self.wordvec_matrix[c[:, 0]],
+                #                  labels,
+                #                  self.weight_matrix[c[:, 1]],
+                #                  self.biases[c[:, 1]])
+                #     monitor(k, obj)
                 n = len(couples)
-                for i in range(0, n - batch_size, batch_size):
-                    wi, wj = numpy.array(zip(*couples[i:i + batch_size]))
-                    trainer.update(wi, wj, self.wordvec_matrix, labels[i:i + batch_size],
-                                   self.weight_matrix, self.biases, update_funcs)
-
+                for i in range(0, n - self.batch_size, self.batch_size):
+                    wi, wj = numpy.array(zip(*couples[i:i + self.batch_size]))
+                    self.trainer.update(self.wordvec_matrix, labels[i:i + self.batch_size], self.weight_matrix,
+                                        self.biases, wi, wj)
 
 
 class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
@@ -199,14 +154,32 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         super(ClusteringSgNsEmbeddingModel, self).__init__(words_limit, dimension, space_factor, window_size,
                                                            neg_sample_rate)
         self.cluster_center_matrix = None
+        self.word_sampling_count = None
 
     def _init_values(self):
         super(ClusteringSgNsEmbeddingModel, self)._init_values()
         self.cluster_center_matrix = zeros((self.words_limit * self.space_factor, self.dimension), dtype=numpy.float32)
+        self.word_sampling_count = zeros(self.words_limit * self.space_factor, dtype=numpy.float32)
 
-    def clustering(self, seq, seq_indices):
-        # TODO
-        pass
+    def fit(self, texts, nb_epoch=1, monitor=None, sampling=True):
+        self._init_values()
+        batch_size = self.batch_size
+        for e in range(nb_epoch):
+            # TODO: do clustering from epoch 2
+            for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
+                n = len(couples)
+                for i in range(0, n - batch_size, batch_size):
+                    wi = [self.get_word_meaning(seq, j) for j in seq_indices[i:i + batch_size]]
+                    wj = [c[1] for c in couples[i:i + batch_size]]
+                    self.trainer.update(self.wordvec_matrix, labels[i:i + batch_size], self.weight_matrix,
+                                        self.biases, wi, wj)
 
-    def cluster_center(self, context_words_indices):
+    def get_word_meaning(self, seq, i):
+        center = self.cluster_center(seq, i)
+        mis = self.word_matrix_index[self.tokenizer.word_list[seq[i]]]
+        return mis[numpy.argmax(numpy.linalg.norm(self.cluster_center_matrix[mis] - center))]
+
+    def cluster_center(self, seq, i):
+        context_words_indices = numpy.asarray(seq)[max(
+            0, i - self.window_size): i + self.window_size]  # FIXME: remove center word
         return numpy.mean(self.weight_matrix[context_words_indices], axis=0)
