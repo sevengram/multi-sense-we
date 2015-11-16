@@ -105,25 +105,27 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
 
     def set_trainer(self, lr=.1, optimizer='sgd', **kwargs):
         x = T.fmatrix("x")
-        y = T.bvector("y")
         w = T.fmatrix("w")
         b = T.fvector("b")
-
+        y = T.bvector("y")
         hx = 1 / (1 + T.exp(-T.sum(w * x, axis=1) - b))
         obj = y * T.log(hx) + (1 - y) * T.log(1 - hx)
 
         if optimizer == 'sgd':
-            self.trainer = SGD(lr=lr, lr_b=kwargs.get('lr_b'),
-                               momentum=kwargs.get('momentum', 0.0), momentum_b=kwargs.get('momentum_b'))
+            self.trainer = SGD(lr=lr,
+                               lr_b=kwargs.get('lr_b'),
+                               momentum=kwargs.get('momentum', 0.0),
+                               momentum_b=kwargs.get('momentum_b'))
         elif optimizer == 'adagrad':
-            self.trainer = AdaGrad(lr=lr, lr_b=kwargs.get('lr_b'),
+            self.trainer = AdaGrad(lr=lr,
+                                   lr_b=kwargs.get('lr_b'),
                                    epsilon=kwargs.get('epsilon', 1e-6),
                                    gx_shape=(self.batch_size, self.dimension),
                                    gw_shape=(self.batch_size, self.dimension),
                                    gb_shape=self.batch_size)
         else:
             raise NotImplementedError()
-        self.trainer.compile(x, w, b, y, obj)
+        self.trainer.compile(x, w, b, y, hx, obj)
 
     def fit(self, texts, nb_epoch=1, monitor=None, sampling=True):
         self._init_values()
@@ -139,8 +141,11 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                 n = len(couples)
                 for i in range(0, n - self.batch_size, self.batch_size):
                     wi, wj = numpy.array(zip(*couples[i:i + self.batch_size]))
-                    self.trainer.update(self.wordvec_matrix, labels[i:i + self.batch_size], self.weight_matrix,
-                                        self.biases, wi, wj)
+                    self.trainer.update(self.wordvec_matrix,
+                                        self.weight_matrix,
+                                        self.biases,
+                                        labels[i:i + self.batch_size],
+                                        wi, wj)
 
 
 class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
@@ -161,17 +166,35 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         for e in range(nb_epoch):
             # TODO: do clustering from epoch 2
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
+                if callable(monitor) and k % 20 == 0:
+                    c = numpy.array(couples)
+                    obj = self.trainer.get_objective_value(self.wordvec_matrix[c[:, 0]],
+                                                           self.weight_matrix[c[:, 1]],
+                                                           self.biases[c[:, 1]],
+                                                           labels)
+                    monitor(k, obj)
                 n = len(couples)
                 for i in range(0, n - batch_size, batch_size):
+                    # get real meaning
                     wi = [self.get_word_meaning(seq, j) for j in seq_indices[i:i + batch_size]]
                     wj = [c[1] for c in couples[i:i + batch_size]]
-                    self.trainer.update(self.wordvec_matrix, labels[i:i + batch_size], self.weight_matrix,
-                                        self.biases, wi, wj)
+                    self.trainer.update(self.wordvec_matrix,
+                                        self.weight_matrix,
+                                        self.biases,
+                                        labels[i:i + batch_size],
+                                        wi, wj)
+                    # update cluster centers
+                    centers = [self.cluster_center(seq, j) for j in seq_indices[i:i + batch_size]]
+                    p = self.word_sampling_count[wi][:, numpy.newaxis]
+                    t = self.cluster_center_matrix[wi] * p + centers
+                    self.word_sampling_count[wi] += 1
+                    self.cluster_center_matrix[wi] = t / p
 
     def get_word_meaning(self, seq, i):
         center = self.cluster_center(seq, i)
         mis = self.word_matrix_index[self.tokenizer.word_list[seq[i]]]
-        return mis[numpy.argmax(numpy.linalg.norm(self.cluster_center_matrix[mis] - center))]
+        # TODO: 1. split words meaning here  2. add cos distance
+        return mis[numpy.argmin(numpy.linalg.norm(self.cluster_center_matrix[mis] - center))]
 
     def cluster_center(self, seq, i):
         context_words_indices = numpy.asarray(seq)[max(

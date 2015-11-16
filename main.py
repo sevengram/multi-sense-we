@@ -7,11 +7,12 @@ import cPickle
 import datetime
 import argparse
 
-from models import ClusteringSgNsEmbeddingModel
+from models import ClusteringSgNsEmbeddingModel, SkipGramNegSampEmbeddingModel
 
 
 def build_monitor(total_lines, monitor_values=None):
     start_time = time.time()
+
     def m(index, objval):
         if monitor_values:
             monitor_values.append(objval)
@@ -22,6 +23,7 @@ def build_monitor(total_lines, monitor_values=None):
             '%.2f%%, estimated remaining time: %d min, objective value: %f\r' % (
                 percent * 100, int(remain_time / 60), objval))
         sys.stdout.flush()
+
     return m
 
 
@@ -58,7 +60,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr_b', metavar='RATE', help='Learning rate for bias', type=float, required=False)
     parser.add_argument('--momentum', metavar='RATE', help='Momentum', type=float, default=.0)
     parser.add_argument('--momentum_b', metavar='RATE', help='Momentum for bias', type=float, required=False)
-    parser.add_argument('--optimizer', metavar='FILE', help='Optimizer type', type=str, required=False)
+    parser.add_argument('--optimizer', metavar='TYPE', help='Optimizer type', type=str, default='sgd')
     parser.add_argument('--objective', help='Save objective value or not', action='store_true')
     parser.add_argument("--test", help="Run a manual test after loading/training", action='store_true')
     args = parser.parse_args()
@@ -98,7 +100,7 @@ if __name__ == '__main__':
         model.load_word_vectors(args.wordvec)
     else:
         print('start fitting model...')
-        model.set_trainer()
+        model.set_trainer(optimizer=args.optimizer)
         model.fit(text_generator(args.data), monitor=build_monitor(file_lines(args.data), obj_trajectory))
     print('\nfinish!')
 
