@@ -112,16 +112,19 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
         hx = 1 / (1 + T.exp(-T.sum(w * x, axis=1) - b))
         # TODO: move objval function into trainer
         # obj = y * T.log(hx) + (1 - y) * T.log(1 - hx)
-        # obj_mean = T.mean(obj)
+        # obj_mean =
         # objval = theano.function(
         #     inputs=[x, y, w, b],
         #     outputs=obj_mean)
 
         if optimizer == 'sgd':
-            self.trainer = SGD(lr=lr, lr_b=kwargs.get('lr_b'),
-                               momentum=kwargs.get('momentum', 0.0), momentum_b=kwargs.get('momentum_b'))
+            self.trainer = SGD(lr=lr,
+                               lr_b=kwargs.get('lr_b'),
+                               momentum=kwargs.get('momentum', 0.0),
+                               momentum_b=kwargs.get('momentum_b'))
         elif optimizer == 'adagrad':
-            self.trainer = AdaGrad(lr=lr, lr_b=kwargs.get('lr_b'),
+            self.trainer = AdaGrad(lr=lr,
+                                   lr_b=kwargs.get('lr_b'),
                                    epsilon=kwargs.get('epsilon', 1e-6),
                                    gx_shape=(self.batch_size, self.dimension),
                                    gw_shape=(self.batch_size, self.dimension),
@@ -169,15 +172,23 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 n = len(couples)
                 for i in range(0, n - batch_size, batch_size):
+                    # get real meaning
                     wi = [self.get_word_meaning(seq, j) for j in seq_indices[i:i + batch_size]]
                     wj = [c[1] for c in couples[i:i + batch_size]]
                     self.trainer.update(self.wordvec_matrix, labels[i:i + batch_size], self.weight_matrix,
                                         self.biases, wi, wj)
+                    # update cluster centers
+                    centers = [self.cluster_center(seq, j) for j in seq_indices[i:i + batch_size]]
+                    p = self.word_sampling_count[wi][:, numpy.newaxis]
+                    t = self.cluster_center_matrix[wi] * p + centers
+                    self.word_sampling_count[wi] += 1
+                    self.cluster_center_matrix[wi] = t / p
 
     def get_word_meaning(self, seq, i):
         center = self.cluster_center(seq, i)
         mis = self.word_matrix_index[self.tokenizer.word_list[seq[i]]]
-        return mis[numpy.argmax(numpy.linalg.norm(self.cluster_center_matrix[mis] - center))]
+        # TODO: split words meaning here
+        return mis[numpy.argmin(numpy.linalg.norm(self.cluster_center_matrix[mis] - center))]
 
     def cluster_center(self, seq, i):
         context_words_indices = numpy.asarray(seq)[max(

@@ -56,7 +56,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr_b', metavar='RATE', help='Learning rate for bias', type=float, required=False)
     parser.add_argument('--momentum', metavar='RATE', help='Momentum', type=float, default=.0)
     parser.add_argument('--momentum_b', metavar='RATE', help='Momentum for bias', type=float, required=False)
-    parser.add_argument('--optimizer', metavar='FILE', help='Optimizer type', type=str, required=False)
+    parser.add_argument('--optimizer', metavar='TYPE', help='Optimizer type', type=str, default='sgd')
     parser.add_argument("--test", help="Run a manual test after loading/training", action='store_true')
     args = parser.parse_args()
 
@@ -90,7 +90,7 @@ if __name__ == '__main__':
         model.load_word_vectors(args.wordvec)
     else:
         print('start fitting model...')
-        model.set_trainer()
+        model.set_trainer(optimizer=args.optimizer)
         model.fit(text_generator(args.data), monitor=build_monitor(time.time(), file_lines(args.data)))
     print('\nfinish!')
 
