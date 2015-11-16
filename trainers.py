@@ -9,12 +9,18 @@ class Trainer(object):
         self.lr = lr
         self.lr_b = lr_b or lr
         self.gradient = None
+        self.objective = None
 
-    def compile(self, x, w, b, y, hx):
-        raise NotImplementedError
+    def compile(self, x, w, b, y, obj):
+        obj_mean = T.mean(obj)
+        self.objective = theano.function(inputs=[x, w, b, y], outputs=[obj_mean])
 
     def update(self, embeds, labels, weights, bias, wi, wj):
         raise NotImplementedError
+
+    def get_objective_value(self, embeds, labels, weights, bias, wi, wj):
+        obj_value = self.objective(embeds[wi], weights[wj], bias[wj], labels)
+        return obj_value
 
 
 class SGD(Trainer):
@@ -23,10 +29,10 @@ class SGD(Trainer):
         self.momentum = momentum
         self.momentum_b = momentum_b or momentum
 
-    def compile(self, x, w, b, y, hx):
-        gb = y - hx
-        gx = T.transpose(gb * T.transpose(w))
-        gw = T.transpose(gb * T.transpose(x))
+    def compile(self, x, w, b, y, obj):
+        super(SGD, self).compile(x, w, b, y, obj)
+        obj_mean = T.mean(obj)
+        gx, gw, gb = T.grad(obj_mean, [x, w, b])
         self.gradient = theano.function(
             inputs=[x, y, w, b],
             outputs=[gx, gw, gb])
@@ -51,14 +57,15 @@ class AdaGrad(Trainer):
         self.acc_gb = zeros(gb_shape, dtype=numpy.float32)
         self.accumulator = None
 
-    def compile(self, x, w, b, y, hx):
+    def compile(self, x, w, b, y, obj):
+        super(AdaGrad, self).compile(x, w, b, y, obj)
         acc_x = T.fmatrix('acc_x')
         acc_w = T.fmatrix('acc_w')
         acc_b = T.fvector('acc_b')
 
-        gb = y - hx
-        gx = T.transpose(gb * T.transpose(w))
-        gw = T.transpose(gb * T.transpose(x))
+        obj_mean = T.mean(obj)
+
+        gx, gw, gb = T.grad(obj_mean, [x, w, b])
 
         acc_nx = acc_x + gx ** 2
         acc_nw = acc_w + gw ** 2

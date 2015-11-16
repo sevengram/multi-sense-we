@@ -3,15 +3,18 @@
 import os
 import sys
 import time
+import cPickle
 import datetime
 import argparse
 
 from models import ClusteringSgNsEmbeddingModel
 
 
-def build_monitor(start_time, total_lines):
+def build_monitor(total_lines, monitor_values=None):
+    start_time = time.time()
     def m(index, objval):
-        # TODO: record the history of objval here
+        if monitor_values:
+            monitor_values.append(objval)
         percent = (float(index) + 1.0) / total_lines
         total_time = (time.time() - start_time) / percent
         remain_time = start_time + total_time - time.time()
@@ -19,7 +22,6 @@ def build_monitor(start_time, total_lines):
             '%.2f%%, estimated remaining time: %d min, objective value: %f\r' % (
                 percent * 100, int(remain_time / 60), objval))
         sys.stdout.flush()
-
     return m
 
 
@@ -57,6 +59,7 @@ if __name__ == '__main__':
     parser.add_argument('--momentum', metavar='RATE', help='Momentum', type=float, default=.0)
     parser.add_argument('--momentum_b', metavar='RATE', help='Momentum for bias', type=float, required=False)
     parser.add_argument('--optimizer', metavar='FILE', help='Optimizer type', type=str, required=False)
+    parser.add_argument('--objective', help='Save objective value or not', action='store_true')
     parser.add_argument("--test", help="Run a manual test after loading/training", action='store_true')
     args = parser.parse_args()
 
@@ -85,19 +88,27 @@ if __name__ == '__main__':
         model.save_word_list(build_filepath(args.output, 'word_list'))
         model.save_word_index(build_filepath(args.output, 'word_index'))
 
+    if args.objective:
+        obj_trajectory = []
+    else:
+        obj_trajectory = None
+
     if args.wordvec:
         print('start loading model...')
         model.load_word_vectors(args.wordvec)
     else:
         print('start fitting model...')
         model.set_trainer()
-        model.fit(text_generator(args.data), monitor=build_monitor(time.time(), file_lines(args.data)))
+        model.fit(text_generator(args.data), monitor=build_monitor(file_lines(args.data), obj_trajectory))
     print('\nfinish!')
 
     if args.output and not args.wordvec:
         print('saving word vectors...')
         model.save_word_vectors(build_filepath(args.output, 'word_vec'))
         model.save_weight_matrix(build_filepath(args.output, 'weights'))
+
+    if args.output and args.objective:
+        cPickle.dump(obj_trajectory, open(build_filepath(args.output, 'objective'), "wb"))
 
     print('end time: %s' % time.ctime())
     print('you may reload the vocab and model, and add --test to run a manual test.')
