@@ -11,16 +11,14 @@ class Trainer(object):
         self.gradient = None
         self.objective = None
 
-    def compile(self, x, w, b, y, obj):
-        obj_mean = T.mean(obj)
-        self.objective = theano.function(inputs=[x, w, b, y], outputs=[obj_mean])
-
-    def update(self, embeds, labels, weights, bias, wi, wj):
+    def compile(self, x, w, b, y, hx, obj):
         raise NotImplementedError
 
-    def get_objective_value(self, embeds, labels, weights, bias, wi, wj):
-        obj_value = self.objective(embeds[wi], weights[wj], bias[wj], labels)
-        return obj_value
+    def update(self, embeds, weights, bias, labels, wi, wj):
+        raise NotImplementedError
+
+    def get_objective_value(self, embeds, weights, bias, labels):
+        return self.objective(embeds, weights, bias, labels)
 
 
 class SGD(Trainer):
@@ -29,20 +27,24 @@ class SGD(Trainer):
         self.momentum = momentum
         self.momentum_b = momentum_b or momentum
 
-    def compile(self, x, w, b, y, obj):
-        super(SGD, self).compile(x, w, b, y, obj)
+    def compile(self, x, w, b, y, hx, obj):
         obj_mean = T.mean(obj)
-        gx, gw, gb = T.grad(obj_mean, [x, w, b])
+        # gx, gw, gb = T.grad(obj_mean, [x, w, b])
+        gb = y - hx
+        gx = T.transpose(gb * T.transpose(w))
+        gw = T.transpose(gb * T.transpose(x))
         self.gradient = theano.function(
-            inputs=[x, y, w, b],
+            inputs=[x, w, b, y],
             outputs=[gx, gw, gb])
+        self.objective = theano.function(
+            inputs=[x, w, b, y],
+            outputs=obj_mean)
 
-    def update(self, embeds, labels, weights, bias, wi, wj):
-        dx, dw, db = self.gradient(embeds[wi], labels, weights[wj], bias[wj])
+    def update(self, embeds, weights, bias, labels, wi, wj):
+        dx, dw, db = self.gradient(embeds[wi], weights[wj], bias[wj], labels)
         update_x = (1.0 - self.momentum) * self.lr * dx - self.momentum * embeds[wi]
         update_w = (1.0 - self.momentum) * self.lr * dw - self.momentum * weights[wj]
         update_b = (1.0 - self.momentum_b) * self.lr_b * db - self.momentum_b * bias[wj]
-
         embeds[wi] += update_x
         weights[wj] += update_w
         bias[wj] += update_b
@@ -57,15 +59,16 @@ class AdaGrad(Trainer):
         self.acc_gb = zeros(gb_shape, dtype=numpy.float32)
         self.accumulator = None
 
-    def compile(self, x, w, b, y, obj):
-        super(AdaGrad, self).compile(x, w, b, y, obj)
+    def compile(self, x, w, b, y, hx, obj):
         acc_x = T.fmatrix('acc_x')
         acc_w = T.fmatrix('acc_w')
         acc_b = T.fvector('acc_b')
 
         obj_mean = T.mean(obj)
-
-        gx, gw, gb = T.grad(obj_mean, [x, w, b])
+        # gx, gw, gb = T.grad(obj_mean, [x, w, b])
+        gb = y - hx
+        gx = T.transpose(gb * T.transpose(w))
+        gw = T.transpose(gb * T.transpose(x))
 
         acc_nx = acc_x + gx ** 2
         acc_nw = acc_w + gw ** 2
@@ -75,14 +78,15 @@ class AdaGrad(Trainer):
         gw_new = gw / T.sqrt(acc_w + self.epsilon)
         gb_new = gb / T.sqrt(acc_b + self.epsilon)
 
-        self.gradient = theano.function(inputs=[acc_x, acc_w, acc_b, x, y, w, b], outputs=[gx_new, gw_new, gb_new])
-        self.accumulator = theano.function(inputs=[acc_x, acc_w, acc_b, x, y, w, b], outputs=[acc_nx, acc_nw, acc_nb])
+        self.gradient = theano.function(inputs=[acc_x, acc_w, acc_b, x, w, b, y], outputs=[gx_new, gw_new, gb_new])
+        self.accumulator = theano.function(inputs=[acc_x, acc_w, acc_b, x, w, b, y], outputs=[acc_nx, acc_nw, acc_nb])
+        self.objective = theano.function(inputs=[x, w, b, y], outputs=obj_mean)
 
-    def update(self, embeds, labels, weights, bias, wi, wj):
+    def update(self, embeds, weights, bias, labels, wi, wj):
         self.acc_gx, self.acc_gw, self.acc_gb = self.accumulator(self.acc_gx, self.acc_gw, self.acc_gb,
-                                                                 embeds[wi], labels, weights[wj], bias[wj])
+                                                                 embeds[wi], weights[wj], bias[wj], labels)
         dx, dw, db = self.gradient(self.acc_gx, self.acc_gw, self.acc_gb,
-                                   embeds[wi], labels, weights[wj], bias[wj])
+                                   embeds[wi], weights[wj], bias[wj], labels)
 
         embeds[wi] += self.lr * dx
         weights[wj] += self.lr * dw

@@ -7,7 +7,7 @@ import cPickle
 import datetime
 import argparse
 
-from models import ClusteringSgNsEmbeddingModel
+from models import ClusteringSgNsEmbeddingModel, SkipGramNegSampEmbeddingModel
 
 
 def build_monitor(total_lines, monitor_values=None):
