@@ -108,14 +108,8 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
         y = T.bvector("y")
         w = T.fmatrix("w")
         b = T.fvector("b")
-
         hx = 1 / (1 + T.exp(-T.sum(w * x, axis=1) - b))
-        # TODO: move objval function into trainer
-        # obj = y * T.log(hx) + (1 - y) * T.log(1 - hx)
-        # obj_mean =
-        # objval = theano.function(
-        #     inputs=[x, y, w, b],
-        #     outputs=obj_mean)
+        obj = y * T.log(hx) + (1 - y) * T.log(1 - hx)
 
         if optimizer == 'sgd':
             self.trainer = SGD(lr=lr,
@@ -131,20 +125,19 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                                    gb_shape=self.batch_size)
         else:
             raise NotImplementedError()
-        self.trainer.compile(x, w, b, y, hx)
+        self.trainer.compile(x, w, b, y, obj)
 
     def fit(self, texts, nb_epoch=1, monitor=None, sampling=True):
         self._init_values()
         for e in range(nb_epoch):
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
-                # TODO: get objval from trainer
-                # if callable(monitor) and k % 20 == 0:
-                #     c = numpy.array(couples)
-                #     obj = objval(self.wordvec_matrix[c[:, 0]],
-                #                  labels,
-                #                  self.weight_matrix[c[:, 1]],
-                #                  self.biases[c[:, 1]])
-                #     monitor(k, obj)
+                if callable(monitor) and k % 20 == 0:
+                    c = numpy.array(couples)
+                    obj = self.trainer.get_objective_value(self.wordvec_matrix[c[:, 0]],
+                                                           self.weight_matrix[c[:, 1]],
+                                                           self.biases[c[:, 1]],
+                                                           labels)
+                    monitor(k, obj)
                 n = len(couples)
                 for i in range(0, n - self.batch_size, self.batch_size):
                     wi, wj = numpy.array(zip(*couples[i:i + self.batch_size]))
