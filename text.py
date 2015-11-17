@@ -23,9 +23,9 @@ def text_to_word_sequence(text, filters=base_filter(), lower=True, split=" "):
 
 class Tokenizer(object):
     def __init__(self, words_limit=None, filters=base_filter(), lower=True, split=" "):
-        self.word_counts = {}
+        self._word_freq = {}
         self._word_index = {}
-        self.word_list = []
+        self._word_list = []
         self.filters = filters
         self.split = split
         self.lower = lower
@@ -39,14 +39,14 @@ class Tokenizer(object):
         for text in texts:
             seq = text_to_word_sequence(text, self.filters, self.lower, self.split)
             for w in seq:
-                if w in self.word_counts:
-                    self.word_counts[w] += 1
+                if w in self._word_freq:
+                    self._word_freq[w] += 1
                 else:
-                    self.word_counts[w] = 1
-        wcounts = list(self.word_counts.items())
+                    self._word_freq[w] = 1
+        wcounts = list(self._word_freq.items())
         wcounts.sort(key=lambda x: x[1], reverse=True)
-        self.word_list = [wc[0] for wc in wcounts]
-        self._word_index = dict(zip(self.word_list, range(len(self.word_list))))
+        self._word_list = [wc[0] for wc in wcounts]
+        self._word_index = dict(zip(self._word_list, range(len(self._word_list))))
 
     def texts_to_sequences_generator(self, texts):
         """
@@ -67,3 +67,9 @@ class Tokenizer(object):
                     else:
                         vect.append(i)
             yield vect
+
+    def count(self):
+        return len(self._word_freq)
+
+    def effective_words(self):
+        return self._word_list[:self.words_limit]

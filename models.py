@@ -17,6 +17,7 @@ class WordEmbeddingModel(object):
         self.dimension = dimension
         self.space_factor = space_factor
         self.tokenizer = None
+        self.word_list = []
         self.word_matrix_index = {}
         self.wordvec_matrix = None
         self.weight_matrix = None
@@ -32,17 +33,17 @@ class WordEmbeddingModel(object):
     def build_vocab(self, texts):
         self.tokenizer = text.Tokenizer(words_limit=self.words_limit)
         self.tokenizer.fit_on_texts(texts)
-        self.words_limit = min(self.words_limit, len(self.tokenizer.word_counts))
-        self._build_word_matrix_index()
+        self._load_words()
 
     def load_vocab(self, path):
         self.tokenizer = cPickle.load(open(path, 'rb'))
-        self.words_limit = min(self.words_limit, len(self.tokenizer.word_counts))
-        self._build_word_matrix_index()
+        self._load_words()
 
-    def _build_word_matrix_index(self):
-        for i in range(self.words_limit):
-            self.word_matrix_index[self.tokenizer.word_list[i]] = [i]
+    def _load_words(self):
+        self.words_limit = min(self.words_limit, self.tokenizer.count())
+        self.word_list = self.tokenizer.effective_words()
+        for i in range(len(self.word_list)):
+            self.word_matrix_index[self.word_list[i]] = [i]
 
     def load_word_vectors(self, path):
         self.wordvec_matrix = cPickle.load(open(path, 'rb'))
@@ -53,7 +54,7 @@ class WordEmbeddingModel(object):
 
     def save_word_list(self, path):
         if path:
-            cPickle.dump(self.tokenizer.word_list, open(path, "wb"))
+            cPickle.dump(self.word_list, open(path, "wb"))
 
     def save_word_index(self, path):
         if path:
@@ -74,17 +75,17 @@ class WordEmbeddingModel(object):
         raise NotImplementedError()
 
     def nearest_words(self, word, limit=20):
-        if self.tokenizer is None or self.wordvec_matrix is None:
+        if self.wordvec_matrix is None:
             print('load vocab and model first!')
             return None
-        word_index = self.tokenizer.word_index.get(word)
+        word_index = self.word_matrix_index.get(word)[0]
         if word_index is None or word_index >= self.wordvec_matrix.shape[0]:
             print('can\'t find this word!')
             return None
         else:
             d = [linalg.norm(self.wordvec_matrix[word_index] - v) for v in self.wordvec_matrix]
             nearest_indices = numpy.argpartition(d, limit)[:limit]
-            return {self.tokenizer.word_list[i]: d[i] for i in nearest_indices}
+            return {self.word_list[i]: d[i] for i in nearest_indices}
 
 
 class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
@@ -149,11 +150,14 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
 
 
 class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
-    def __init__(self, words_limit=5000, dimension=128, space_factor=4, window_size=5, neg_sample_rate=1.):
+    def __init__(self, words_limit=5000, dimension=128, space_factor=4, window_size=5, neg_sample_rate=1., max_senses=5,
+                 mu=1.):
         super(ClusteringSgNsEmbeddingModel, self).__init__(words_limit, dimension, space_factor, window_size,
                                                            neg_sample_rate)
         self.cluster_center_matrix = None
         self.word_sampling_count = None
+        self.max_senses = max_senses
+        self.mu = mu
 
     def _init_values(self):
         super(ClusteringSgNsEmbeddingModel, self)._init_values()
@@ -176,7 +180,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                 n = len(couples)
                 for i in range(0, n - batch_size, batch_size):
                     # get real meaning
-                    wi = [self.get_word_meaning(seq, j) for j in seq_indices[i:i + batch_size]]
+                    wi = [self.get_word_sense(seq, si) for si in seq_indices[i:i + batch_size]]
                     wj = [c[1] for c in couples[i:i + batch_size]]
                     self.trainer.update(self.wordvec_matrix,
                                         self.weight_matrix,
@@ -184,19 +188,33 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                                         labels[i:i + batch_size],
                                         wi, wj)
                     # update cluster centers
-                    centers = [self.cluster_center(seq, j) for j in seq_indices[i:i + batch_size]]
-                    p = self.word_sampling_count[wi][:, numpy.newaxis]
-                    t = self.cluster_center_matrix[wi] * p + centers
+                    ceb = [self.context_embedding(seq, si) for si in seq_indices[i:i + batch_size]]
+                    t = self.cluster_center_matrix[wi] * self.word_sampling_count[wi][:, numpy.newaxis] + ceb
                     self.word_sampling_count[wi] += 1
-                    self.cluster_center_matrix[wi] = t / p
+                    self.cluster_center_matrix[wi] = t / self.word_sampling_count[wi][:, numpy.newaxis]
 
-    def get_word_meaning(self, seq, i):
-        center = self.cluster_center(seq, i)
-        mis = self.word_matrix_index[self.tokenizer.word_list[seq[i]]]
-        # TODO: 1. split words meaning here  2. add cos distance
-        return mis[numpy.argmin(numpy.linalg.norm(self.cluster_center_matrix[mis] - center))]
+    def get_word_sense(self, seq, si):
+        ceb = self.context_embedding(seq, si)
+        word = self.word_list[seq[si]]
+        mis = self.word_matrix_index[word]
+        distances = numpy.linalg.norm(self.cluster_center_matrix[mis] - ceb, axis=1)  # TODO: first time problem
+        i = numpy.argmin(distances)
+        if distances[i] > self.mu:
+            result = self.split_sense(word, mis[i])
+        else:
+            result = mis[i]
+        return result
 
-    def cluster_center(self, seq, i):
+    def split_sense(self, word, i):
+        new_index = len(self.word_list)
+        self.word_list.append(word)
+        self.word_matrix_index[word].append(new_index)
+        self.wordvec_matrix[new_index] = self.wordvec_matrix[i]
+        self.weight_matrix[new_index] = self.weight_matrix[i]
+        self.biases[new_index] = self.biases[i]
+        return new_index
+
+    def context_embedding(self, seq, si):
         context_words_indices = numpy.asarray(seq)[max(
-            0, i - self.window_size): i + self.window_size]  # FIXME: remove center word
+            0, si - self.window_size): si + self.window_size]  # FIXME: remove center word
         return numpy.mean(self.weight_matrix[context_words_indices], axis=0)
