@@ -182,11 +182,14 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                     # get real meaning
                     wi = [self.get_word_sense(seq, si) for si in seq_indices[i:i + batch_size]]
                     wj = [c[1] for c in couples[i:i + batch_size]]
+
+                    # trainer update
                     self.trainer.update(self.wordvec_matrix,
                                         self.weight_matrix,
                                         self.biases,
                                         labels[i:i + batch_size],
                                         wi, wj)
+
                     # update cluster centers
                     ceb = [self.context_embedding(seq, si) for si in seq_indices[i:i + batch_size]]
                     t = self.cluster_center_matrix[wi] * self.word_sampling_count[wi][:, numpy.newaxis] + ceb
@@ -197,7 +200,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         ceb = self.context_embedding(seq, si)
         word = self.word_list[seq[si]]
         mis = self.word_matrix_index[word]
-        distances = numpy.linalg.norm(self.cluster_center_matrix[mis] - ceb, axis=1)  # TODO: first time problem
+        distances = numpy.linalg.norm(self.cluster_center_matrix[mis] - ceb, axis=1)  # FIXME: first time problem
         i = numpy.argmin(distances)
         if distances[i] > self.mu:
             result = self.split_sense(word, mis[i])
@@ -215,6 +218,5 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         return new_index
 
     def context_embedding(self, seq, si):
-        context_words_indices = numpy.asarray(seq)[max(
-            0, si - self.window_size): si + self.window_size]  # FIXME: remove center word
+        context_words_indices = seq[max(0, si - self.window_size): si + self.window_size]  # FIXME: remove center word
         return numpy.mean(self.weight_matrix[context_words_indices], axis=0)
