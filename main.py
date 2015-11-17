@@ -16,13 +16,14 @@ def build_monitor(total_lines, monitor_values=None):
     def m(index, objval):
         if monitor_values:
             monitor_values.append(objval)
-        percent = (float(index) + 1.0) / total_lines
-        total_time = (time.time() - start_time) / percent
-        remain_time = start_time + total_time - time.time()
-        sys.stdout.write(
-            '%.2f%%, estimated remaining time: %d min, objective value: %f\r' % (
-                percent * 100, int(remain_time / 60), objval))
-        sys.stdout.flush()
+        if index != 0:
+            percent = float(index) / total_lines
+            total_time = (time.time() - start_time) / percent
+            remain_time = start_time + total_time - time.time()
+            sys.stdout.write(
+                '%.2f%%, estimated remaining time: %d min, objective value: %f\r' % (
+                    percent * 100, int(remain_time / 60), objval))
+            sys.stdout.flush()
 
     return m
 
