@@ -32,6 +32,7 @@ class WordEmbeddingModel(object):
         self.biases = None
         self.min_count = min_count
         self.use_stop_words = use_stop_words
+        self._init_values()
 
     def _init_values(self):
         factor = self.space_factor
@@ -55,6 +56,20 @@ class WordEmbeddingModel(object):
         self.word_list = self.tokenizer.provide_word_list()
         for i in range(len(self.word_list)):
             self.word_matrix_index[self.word_list[i]] = [i]
+
+    def dump(self, path):
+        if path:
+            params = []
+            params.append(self.wordvec_matrix)
+            params.append(self.weight_matrix)
+            params.append(self.biases)
+            cPickle.dump(params, open(path, "wb"))
+
+    def load(self, path):
+        params = cPickle.load(open(path, "rb"))
+        self.wordvec_matrix = params[0]
+        self.weight_matrix = params[1]
+        self.biases = params[2]
 
     def load_word_vectors(self, path):
         self.wordvec_matrix = cPickle.load(open(path, 'rb'))
@@ -142,7 +157,6 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
         self.trainer.compile(x, w, b, y, obj)
 
     def fit(self, texts, nb_epoch=1, monitor=None, sampling=True):
-        self._init_values()
         for e in range(nb_epoch):
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 if callable(monitor) and k % 20 == 0:
@@ -164,8 +178,8 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
 
 class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
     def __init__(self, words_limit=5000, dimension=128, space_factor=4, window_size=5, neg_sample_rate=1., batch_size=8,
-                 max_senses=5, threshold=1., min_count=5, use_stop_words=False, learn_top_multi=None, skip_list=None,  distance_type='COS',
-                 use_dpmeans=True):
+                 max_senses=5, threshold=1., min_count=5, use_stop_words=False, learn_top_multi=None, skip_list=None,
+                 distance_type='COS', use_dpmeans=True):
         super(ClusteringSgNsEmbeddingModel, self).__init__(words_limit=words_limit, dimension=dimension,
                                                            space_factor=space_factor, window_size=window_size,
                                                            neg_sample_rate=neg_sample_rate, batch_size=batch_size,
@@ -180,6 +194,37 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         self.distance_type = distance_type
         self.num_active_we = 0
         self.use_dpmeans = use_dpmeans
+        self.cluster_center_matrix = zeros((self.words_limit * self.space_factor, self.dimension), dtype=numpy.float32)
+        self.word_count_inCluster = zeros(self.words_limit * self.space_factor, dtype=numpy.float32)
+
+    def dump(self, path):
+        if path:
+            params = []
+            params.append(self.wordvec_matrix)
+            params.append(self.weight_matrix)
+            params.append(self.biases)
+            params.append(self.cluster_center_matrix)
+            params.append(self.word_count_inCluster)
+            params.append(self.word_matrix_index)
+
+            cPickle.dump(params, open(path, 'wb'))
+
+    def load(self, path):
+        params = cPickle.load(open(path, 'rb'))
+        assert len(params[1]) == self.words_limit, "size dont match, %d vs. %d" % (len(params[1]), self.words_limit)
+        self.weight_matrix = params[1]
+        self.biases = params[2]
+        if len(params) == 3:
+            assert len(params[0]) == self.words_limit, "size dont match, %d vs. %d" % (len(params[0]), self.words_limit)
+            self.wordvec_matrix[:self.words_limit] = params[0]
+        else:
+            assert len(params[0]) == self.words_limit*self.space_factor, "size dont match, %d vs %d" % \
+                                                                         (len(params[0]),
+                                                                          self.words_limit*self.space_factor)
+            self.wordvec_matrix = params[0]
+            self.cluster_center_matrix = params[3]
+            self.word_count_inCluster = params[4]
+            self.word_matrix_index = params[5]
 
     def build_vocab(self, texts):
         super(ClusteringSgNsEmbeddingModel, self).build_vocab(texts)
@@ -202,13 +247,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                 if self.word_list[i] in self.skip_list:
                     self.learnMultiVec[i] = False
 
-    def _init_values(self):
-        super(ClusteringSgNsEmbeddingModel, self)._init_values()
-        self.cluster_center_matrix = zeros((self.words_limit * self.space_factor, self.dimension), dtype=numpy.float32)
-        self.word_count_inCluster = zeros(self.words_limit * self.space_factor, dtype=numpy.float32)
-
     def fit_bis(self, texts, nb_epoch=1, monitor=None, sampling=True):
-        self._init_values()
         batch_size = self.batch_size
         for e in range(nb_epoch):
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
@@ -239,7 +278,6 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                     self.cluster_center_matrix[wi] = t / self.word_count_inCluster[wi][:, numpy.newaxis]
 
     def fit(self, texts, nb_epoch=1, monitor=None, sampling=True):
-        self._init_values()
         batch_size = self.batch_size
         for e in range(nb_epoch):
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):

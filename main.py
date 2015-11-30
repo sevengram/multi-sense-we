@@ -14,7 +14,7 @@ def build_monitor(total_lines, monitor_values=None):
     start_time = time.time()
 
     def m(index, objval):
-        if monitor_values:
+        if monitor_values is not None:
             monitor_values.append(objval)
         if index != 0:
             percent = float(index) / total_lines
@@ -35,7 +35,7 @@ def text_generator(path):
 
 
 def build_filepath(dirpath, name):
-    return "%s/%s_%s.pkl" % (dirpath, name, datetime.datetime.now().strftime('%Y%m%d%H%M%S'))
+    return "%s%s_%s.pkl" % (dirpath, name, datetime.datetime.now().strftime('%m%d%H%M'))
 
 
 def file_lines(path):
@@ -57,6 +57,8 @@ if __name__ == '__main__':
     parser.add_argument('--vocab', metavar='FILE', help='File to load vocab', type=str, required=False)
     parser.add_argument('--wordvec', metavar='FILE', help='File to load word vectors', type=str, required=False)
     parser.add_argument('--output', metavar='FILE', help='Path to save data', type=str, required=False)
+    parser.add_argument('--save_params', metavar='FILE', help='Path to save parameters', type=str, required=False)
+    parser.add_argument('--load_params', metavar='FILE', help='Path to load parameters', type=str, required=False)
     parser.add_argument('--batch', metavar='SIZE', help='Batch size', type=int, default=8)
     parser.add_argument('--learnMultiTop', metavar='SIZE', help='Only learn multiple vectors for top V words',
                         type=int, default=4000)
@@ -113,15 +115,23 @@ if __name__ == '__main__':
         obj_trajectory = None
 
     if args.wordvec:
-        print('start loading model...')
+        print('start loading word vectors...')
         model.load_word_vectors(args.wordvec)
     else:
+        if args.load_params:
+            print('loading previous parameters...')
+            model.load(args.load_params)
         print('start fitting model...')
-        model.set_trainer(optimizer=args.optimizer)
-        model.fit(text_generator(args.data), monitor=build_monitor(file_lines(args.data), obj_trajectory))
+        model.set_trainer(lr=args.lr, lr_b=args.lr_b, momentum=args.momentum, momentum_b=args.momentum_b,
+                          optimizer=args.optimizer)
+        model.fit(text_generator(args.data), nb_epoch=args.epoch, monitor=build_monitor(file_lines(args.data), obj_trajectory))
     print('\nfinish!')
 
-    if args.output and not args.wordvec:
+    if args.save_params:
+        print('saveing all parameters...')
+        model.dump(build_filepath(args.save_params, 'params'))
+
+    if args.output and not args.wordvec and not args.save_params:
         print('saving word vectors...')
         model.save_word_vectors(build_filepath(args.output, 'word_vec'))
         model.save_weight_matrix(build_filepath(args.output, 'weights'))
