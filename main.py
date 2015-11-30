@@ -7,7 +7,7 @@ import cPickle
 import datetime
 import argparse
 
-from models import ClusteringSgNsEmbeddingModel, SkipGramNegSampEmbeddingModel
+from models import ClusteringSgNsEmbeddingModel, SkipGramNegSampEmbeddingModel, ClusteringSgMultiEmbeddingModelMP
 
 
 def build_monitor(total_lines, monitor_values=None):
@@ -48,14 +48,18 @@ def file_lines(path):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--model', metavar='MODEL', help='which model to use', type=str, default='CLMP')
     parser.add_argument('--data', metavar='FILE', help='data file', type=str, required=False)
     parser.add_argument('--dimension', metavar='N', help='Dimension size', type=int, default=128)
     parser.add_argument('--window', metavar='SIZE', help='Window size', type=int, default=5)
-    parser.add_argument('--limit', metavar='LIMIT', help='Words limit', type=int, default=5000)
+    parser.add_argument('--limit', metavar='LIMIT', help='Words limit', type=int, default=40000)
+    parser.add_argument('--min_count', metavar='COUNT', help='Minimum count using', type=int, required=False)
     parser.add_argument('--vocab', metavar='FILE', help='File to load vocab', type=str, required=False)
     parser.add_argument('--wordvec', metavar='FILE', help='File to load word vectors', type=str, required=False)
     parser.add_argument('--output', metavar='FILE', help='Path to save data', type=str, required=False)
     parser.add_argument('--batch', metavar='SIZE', help='Batch size', type=int, default=8)
+    parser.add_argument('--learnMultiTop', metavar='SIZE', help='Only learn multiple vectors for top V words',
+                        type=int, default=4000)
     parser.add_argument('--epoch', metavar='COUNT', help='Epoch count', type=int, default=1)
     parser.add_argument('--lr', metavar='RATE', help='Learning rate', type=float, default=.1)
     parser.add_argument('--lr_b', metavar='RATE', help='Learning rate for bias', type=float, required=False)
@@ -69,7 +73,19 @@ if __name__ == '__main__':
     if args.output and not os.path.exists(args.output):
         os.makedirs(args.output)
 
-    model = ClusteringSgNsEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window)
+    model = None
+    if args.model == 'CLMP':
+        model = ClusteringSgMultiEmbeddingModelMP(words_limit=args.limit, dimension=args.dimension,
+                                                  window_size=args.window, batch_size=args.batch,
+                                                  learn_top_multi=args.learnMultiTop)
+    elif args.model == 'CL':
+        model = ClusteringSgNsEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window,
+                                             batch_size=args.batch, learn_top_multi=args.learnMultiTop)
+    elif args.model == 'SG':
+        model = SkipGramNegSampEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window,
+                                              batch_size=args.batch, min_count=args.min_count)
+    else:
+        NotImplementedError()
     if not args.vocab and not args.data:
         print('invalid vocab input')
     if not args.wordvec and not args.data:

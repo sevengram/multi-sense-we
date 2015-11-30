@@ -27,7 +27,7 @@ def make_sampling_table(size, sampling_factor=1e-5):
     return numpy.minimum(1., f / numpy.sqrt(f))
 
 
-def skipgrams(sequence, vocabulary_size, window_size=4, negative_samples=1., shuffle=True, sampling_table=None):
+def skipgrams(sequence, vocabulary_size, window_size=4, negative_samples=1., shuffle=True, sampling_table=None, seed=None):
     """ 
         Take a sequence (list of indexes of words), 
         returns couples of [word_index, other_word index] and labels (1s or 0s),
@@ -65,17 +65,13 @@ def skipgrams(sequence, vocabulary_size, window_size=4, negative_samples=1., shu
         nb_negative_samples = int(len(labels) * negative_samples)
         words = [c[0] for c in couples]
         indices = [d for d in seq_indices]
-        seed = random.randint(0, 10e6)
-        random.seed(seed)
-        random.shuffle(words)
-        random.seed(seed)
-        random.shuffle(indices)
         couples += [[words[i % len(words)], random.randint(1, vocabulary_size - 1)] for i in range(nb_negative_samples)]
         seq_indices += [indices[i % len(words)] for i in range(nb_negative_samples)]
         labels += [0] * nb_negative_samples
 
     if shuffle:
-        seed = random.randint(0, 10e6)
+        if seed is None:
+            seed = random.randint(0, 10e6)
         random.seed(seed)
         random.shuffle(couples)
         random.seed(seed)
