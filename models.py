@@ -401,7 +401,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 class ClusteringSgMultiEmbeddingModelMP(ClusteringSgNsEmbeddingModel):
     def __init__(self, words_limit=5000, dimension=128, space_factor=4, window_size=5, neg_sample_rate=1., batch_size=8,
                  max_senses=5, threshold=1., min_count=5, use_stop_words=False, learn_top_multi=None, skip_list=None,
-                 distance_type='COS', use_dpmeans=True, num_process = 2):
+                 distance_type='COS', use_dpmeans=True, num_process=2):
         super(ClusteringSgMultiEmbeddingModelMP, self).__init__(words_limit=words_limit, dimension=dimension,
                                                                 space_factor=space_factor, window_size=window_size,
                                                                 neg_sample_rate=neg_sample_rate, batch_size=batch_size,
