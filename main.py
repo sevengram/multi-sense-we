@@ -7,7 +7,7 @@ import cPickle
 import datetime
 import argparse
 
-from models import ClusteringSgNsEmbeddingModel, SkipGramNegSampEmbeddingModel, ClusteringSgMultiEmbeddingModelMP
+from models import ClusteringSgNsEmbeddingModel, SkipGramNegSampEmbeddingModel
 
 
 def build_monitor(total_lines, monitor_values=None):
@@ -48,7 +48,7 @@ def file_lines(path):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', metavar='MODEL', help='which model to use', type=str, default='CLMP')
+    parser.add_argument('--model', metavar='MODEL', help='which model to use', type=str, default='CL')
     parser.add_argument('--data', metavar='FILE', help='data file', type=str, required=False)
     parser.add_argument('--dimension', metavar='N', help='Dimension size', type=int, default=128)
     parser.add_argument('--window', metavar='SIZE', help='Window size', type=int, default=5)
@@ -76,11 +76,11 @@ if __name__ == '__main__':
         os.makedirs(args.output)
 
     model = None
-    if args.model == 'CLMP':
-        model = ClusteringSgMultiEmbeddingModelMP(words_limit=args.limit, dimension=args.dimension,
-                                                  window_size=args.window, batch_size=args.batch,
-                                                  learn_top_multi=args.learnMultiTop)
-    elif args.model == 'CL':
+    # if args.model == 'CLMP':
+    #     model = ClusteringSgMultiEmbeddingModelMP(words_limit=args.limit, dimension=args.dimension,
+    #                                               window_size=args.window, batch_size=args.batch,
+    #                                               learn_top_multi=args.learnMultiTop)
+    if args.model == 'CL':
         model = ClusteringSgNsEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window,
                                              batch_size=args.batch, learn_top_multi=args.learnMultiTop)
     elif args.model == 'SG':

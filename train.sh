@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 #python main.py --model=SG --data=./data/text8 --dimension=128 --window=5 --limit=200000 --min_count=15 --optimizer=sgd \
 #--lr=0.1 --objective --output=./output/SG_
 
