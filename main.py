@@ -117,15 +117,17 @@ if __name__ == '__main__':
     if args.wordvec:
         print('start loading word vectors...')
         model.load_word_vectors(args.wordvec)
-    else:
-        if args.load_params:
-            print('loading previous parameters...')
-            model.load(args.load_params)
+
+    if args.load_params:
+        print('loading previous parameters...')
+        model.load(args.load_params)
+
+    if not args.test:
         print('start fitting model...')
         model.set_trainer(lr=args.lr, lr_b=args.lr_b, momentum=args.momentum, momentum_b=args.momentum_b,
                           optimizer=args.optimizer)
         model.fit(text_generator(args.data), nb_epoch=args.epoch, monitor=build_monitor(file_lines(args.data), obj_trajectory))
-    print('\nfinish!')
+        print('\nfinish!')
 
     if args.save_params:
         print('saveing all parameters...')
