@@ -11,7 +11,7 @@ class Trainer(object):
         self.gradient = None
         self.objective = None
 
-    def compile(self, x, w, b, y, hx, obj):
+    def compile(self, x, w, b, y, obj):
         raise NotImplementedError
 
     def update(self, embeds, weights, bias, labels, wi, wj):
@@ -27,12 +27,10 @@ class SGD(Trainer):
         self.momentum = momentum
         self.momentum_b = momentum_b or momentum
 
-    def compile(self, x, w, b, y, hx, obj):
+    def compile(self, x, w, b, y, obj):
         obj_mean = T.mean(obj)
-        # gx, gw, gb = T.grad(obj_mean, [x, w, b])
-        gb = y - hx
-        gx = T.transpose(gb * T.transpose(w))
-        gw = T.transpose(gb * T.transpose(x))
+        obj_sum = T.sum(obj)
+        gx, gw, gb = T.grad(obj_sum, [x, w, b])
         self.gradient = theano.function(
             inputs=[x, w, b, y],
             outputs=[gx, gw, gb])
@@ -59,16 +57,14 @@ class AdaGrad(Trainer):
         self.acc_gb = zeros(gb_shape, dtype=numpy.float32)
         self.accumulator = None
 
-    def compile(self, x, w, b, y, hx, obj):
+    def compile(self, x, w, b, y, obj):
         acc_x = T.fmatrix('acc_x')
         acc_w = T.fmatrix('acc_w')
         acc_b = T.fvector('acc_b')
 
         obj_mean = T.mean(obj)
-        # gx, gw, gb = T.grad(obj_mean, [x, w, b])
-        gb = y - hx
-        gx = T.transpose(gb * T.transpose(w))
-        gw = T.transpose(gb * T.transpose(x))
+        obj_sum = T.sum(obj)
+        gx, gw, gb = T.grad(obj_sum, [x, w, b])
 
         acc_nx = acc_x + gx ** 2
         acc_nw = acc_w + gw ** 2

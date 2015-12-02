@@ -3,16 +3,24 @@
 import cPickle
 
 import numpy
+import sys
 from numpy import random, zeros, linalg
 from theano import tensor as T
+from functools import partial
 
 import sequence
 import text
+import pathos.multiprocessing as mp
+from multiprocessing import Manager
 from trainers import SGD, AdaGrad
+from scipy.spatial.distance import cosine, euclidean
+
+MAXI = sys.maxint
+manager = Manager()
 
 
 class WordEmbeddingModel(object):
-    def __init__(self, words_limit=5000, dimension=128, space_factor=1):
+    def __init__(self, words_limit=50000, dimension=128, space_factor=1, min_count=5, use_stop_words=False):
         self.words_limit = words_limit
         self.dimension = dimension
         self.space_factor = space_factor
@@ -22,6 +30,9 @@ class WordEmbeddingModel(object):
         self.wordvec_matrix = None
         self.weight_matrix = None
         self.biases = None
+        self.min_count = min_count
+        self.use_stop_words = use_stop_words
+        self._init_values()
 
     def _init_values(self):
         factor = self.space_factor
@@ -31,7 +42,8 @@ class WordEmbeddingModel(object):
         self.biases = zeros(self.words_limit * factor, dtype=numpy.float32)
 
     def build_vocab(self, texts):
-        self.tokenizer = text.Tokenizer(words_limit=self.words_limit)
+        self.tokenizer = text.Tokenizer(words_limit=self.words_limit, min_count=self.min_count,
+                                        use_stop_words=self.use_stop_words)
         self.tokenizer.fit_on_texts(texts)
         self._load_words()
 
@@ -41,9 +53,23 @@ class WordEmbeddingModel(object):
 
     def _load_words(self):
         self.words_limit = min(self.words_limit, self.tokenizer.count())
-        self.word_list = self.tokenizer.effective_words()
+        self.word_list = self.tokenizer.provide_word_list()
         for i in range(len(self.word_list)):
             self.word_matrix_index[self.word_list[i]] = [i]
+
+    def dump(self, path):
+        if path:
+            params = []
+            params.append(self.wordvec_matrix)
+            params.append(self.weight_matrix)
+            params.append(self.biases)
+            cPickle.dump(params, open(path, "wb"))
+
+    def load(self, path):
+        params = cPickle.load(open(path, "rb"))
+        self.wordvec_matrix = params[0]
+        self.weight_matrix = params[1]
+        self.biases = params[2]
 
     def load_word_vectors(self, path):
         self.wordvec_matrix = cPickle.load(open(path, 'rb'))
@@ -90,8 +116,10 @@ class WordEmbeddingModel(object):
 
 class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
     def __init__(self, words_limit=5000, dimension=128, space_factor=1, window_size=5, neg_sample_rate=1.,
-                 batch_size=4):
-        super(SkipGramNegSampEmbeddingModel, self).__init__(words_limit, dimension, space_factor)
+                 batch_size=8, min_count=5, use_stop_words=False):
+        super(SkipGramNegSampEmbeddingModel, self).__init__(words_limit=words_limit, dimension=dimension,
+                                                            space_factor=space_factor, min_count=min_count,
+                                                            use_stop_words=use_stop_words)
         self.window_size = window_size
         self.batch_size = batch_size
         self.neg_sample_rate = neg_sample_rate
@@ -126,10 +154,9 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                                    gb_shape=self.batch_size)
         else:
             raise NotImplementedError()
-        self.trainer.compile(x, w, b, y, hx, obj)
+        self.trainer.compile(x, w, b, y, obj)
 
     def fit(self, texts, nb_epoch=1, monitor=None, sampling=True):
-        self._init_values()
         for e in range(nb_epoch):
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 if callable(monitor) and k % 20 == 0:
@@ -150,25 +177,79 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
 
 
 class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
-    def __init__(self, words_limit=5000, dimension=128, space_factor=4, window_size=5, neg_sample_rate=1., max_senses=5,
-                 mu=1.):
-        super(ClusteringSgNsEmbeddingModel, self).__init__(words_limit, dimension, space_factor, window_size,
-                                                           neg_sample_rate)
+    def __init__(self, words_limit=5000, dimension=128, space_factor=4, window_size=5, neg_sample_rate=1., batch_size=8,
+                 max_senses=5, threshold=1., min_count=5, use_stop_words=False, learn_top_multi=None, skip_list=None,
+                 distance_type='COS', use_dpmeans=True):
+        super(ClusteringSgNsEmbeddingModel, self).__init__(words_limit=words_limit, dimension=dimension,
+                                                           space_factor=space_factor, window_size=window_size,
+                                                           neg_sample_rate=neg_sample_rate, batch_size=batch_size,
+                                                           min_count=min_count, use_stop_words=use_stop_words)
         self.cluster_center_matrix = None
-        self.word_sampling_count = None
+        self.word_count_inCluster = None
         self.max_senses = max_senses
-        self.mu = mu
-
-    def _init_values(self):
-        super(ClusteringSgNsEmbeddingModel, self)._init_values()
+        self.threshold = threshold
+        self.learn_top_multi = learn_top_multi
+        self.skip_list = skip_list
+        self.learnMultiVec = []
+        self.distance_type = distance_type
+        self.num_active_we = 0
+        self.use_dpmeans = use_dpmeans
         self.cluster_center_matrix = zeros((self.words_limit * self.space_factor, self.dimension), dtype=numpy.float32)
-        self.word_sampling_count = zeros(self.words_limit * self.space_factor, dtype=numpy.float32)
+        self.word_count_inCluster = zeros(self.words_limit * self.space_factor, dtype=numpy.float32)
 
-    def fit(self, texts, nb_epoch=1, monitor=None, sampling=True):
-        self._init_values()
+    def dump(self, path):
+        if path:
+            params = []
+            params.append(self.wordvec_matrix)
+            params.append(self.weight_matrix)
+            params.append(self.biases)
+            params.append(self.cluster_center_matrix)
+            params.append(self.word_count_inCluster)
+            params.append(self.word_matrix_index)
+
+            cPickle.dump(params, open(path, 'wb'))
+
+    def load(self, path):
+        params = cPickle.load(open(path, 'rb'))
+        assert len(params[1]) == self.words_limit, "size dont match, %d vs. %d" % (len(params[1]), self.words_limit)
+        self.weight_matrix = params[1]
+        self.biases = params[2]
+        if len(params) == 3:
+            assert len(params[0]) == self.words_limit, "size dont match, %d vs. %d" % (len(params[0]), self.words_limit)
+            self.wordvec_matrix[:self.words_limit] = params[0]
+        else:
+            assert len(params[0]) == self.words_limit*self.space_factor, "size dont match, %d vs %d" % \
+                                                                         (len(params[0]),
+                                                                          self.words_limit*self.space_factor)
+            self.wordvec_matrix = params[0]
+            self.cluster_center_matrix = params[3]
+            self.word_count_inCluster = params[4]
+            self.word_matrix_index = params[5]
+
+    def build_vocab(self, texts):
+        super(ClusteringSgNsEmbeddingModel, self).build_vocab(texts)
+        self.set_learn_vector()
+
+    def load_vocab(self, path):
+        super(ClusteringSgNsEmbeddingModel, self).load_vocab(path)
+        self.set_learn_vector()
+
+    def set_learn_vector(self):
+        self.num_active_we = self.words_limit
+        length = len(self.word_list)
+        self.learnMultiVec = [True]*length
+        if self.learn_top_multi is not None and self.learn_top_multi < length:
+            self.learnMultiVec[self.learn_top_multi:] = [False]*(length - self.learn_top_multi)
+            length = self.learn_top_multi
+
+        if self.skip_list is not None:
+            for i in xrange(length):
+                if self.word_list[i] in self.skip_list:
+                    self.learnMultiVec[i] = False
+
+    def fit_bis(self, texts, nb_epoch=1, monitor=None, sampling=True):
         batch_size = self.batch_size
         for e in range(nb_epoch):
-            # TODO: do clustering from epoch 2
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 if callable(monitor) and k % 20 == 0:
                     c = numpy.array(couples)
@@ -192,9 +273,104 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 
                     # update cluster centers
                     ceb = [self.context_embedding(seq, si) for si in seq_indices[i:i + batch_size]]
-                    t = self.cluster_center_matrix[wi] * self.word_sampling_count[wi][:, numpy.newaxis] + ceb
-                    self.word_sampling_count[wi] += 1
-                    self.cluster_center_matrix[wi] = t / self.word_sampling_count[wi][:, numpy.newaxis]
+                    t = self.cluster_center_matrix[wi] * self.word_count_inCluster[wi][:, numpy.newaxis] + ceb
+                    self.word_count_inCluster[wi] += 1
+                    self.cluster_center_matrix[wi] = t / self.word_count_inCluster[wi][:, numpy.newaxis]
+
+    def fit(self, texts, nb_epoch=1, monitor=None, sampling=True):
+        batch_size = self.batch_size
+        for e in range(nb_epoch):
+            for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
+                if callable(monitor) and k % 20 == 0:
+                    c = numpy.array(couples)
+                    obj = self.trainer.get_objective_value(self.wordvec_matrix[c[:, 0]],
+                                                           self.weight_matrix[c[:, 1]],
+                                                           self.biases[c[:, 1]],
+                                                           labels)
+                    monitor(k, obj)
+                n = len(couples)
+                for i in range(0, n - batch_size, batch_size):
+                    # get real meaning
+                    wi_org = [c[0] for c in couples[i:i + batch_size]]
+                    wi = self.clustering(seq, wi_org, seq_indices[i:i+batch_size])
+                    wj = [c[1] for c in couples[i:i + batch_size]]
+
+                    # if callable(monitor) and i == 0 and k % 20 == 0:
+                    #     obj = self.trainer.get_objective_value(self.wordvec_matrix[wi],
+                    #                                        self.weight_matrix[wj],
+                    #                                        self.biases[wj],
+                    #                                        labels[i:i+batch_size])
+                    #     monitor(k, obj)
+                    # trainer update
+                    self.trainer.update(self.wordvec_matrix,
+                                        self.weight_matrix,
+                                        self.biases,
+                                        labels[i:i + batch_size],
+                                        wi, wj)
+
+    def clustering(self, seq, w_org, seq_indices):
+        w_new = [0]*len(w_org)
+        for i, (w, seq_idx) in enumerate(zip(w_org, seq_indices)):
+            self.single_clustering(seq, w, seq_idx, w_new, i)
+        return w_new
+
+    def single_clustering(self, seq, w_idx, seq_idx, w_new, idx):
+        if self.learnMultiVec[w_idx]:
+            if self.use_dpmeans:
+                self.dpmeans(seq, w_idx, seq_idx, w_new, idx)
+            else:
+                self.kmeans(seq, w_idx, seq_idx, w_new, idx)
+        else:
+            w_new[idx] = w_idx
+
+    def kmeans(self, seq, w_idx, seq_idx, w_new, idx):
+        context_embedding = self.context_embedding(seq, seq_idx)
+        current_centers_idx = self.word_matrix_index[self.word_list[w_idx]]
+        min_dis = MAXI
+        sense = 0
+        for cc in current_centers_idx:
+            if self.distance_type == 'COS':
+                dist = cosine(self.cluster_center_matrix[cc]/self.word_count_inCluster[cc], context_embedding)
+            elif self.distance_type == 'EUC':
+                dist = euclidean(self.cluster_center_matrix[cc]/self.word_count_inCluster[cc], context_embedding)
+            if dist < min_dis:
+                min_dis = dist
+                sense = cc
+        w_new[idx] = sense
+        self.cluster_center_matrix[sense] += context_embedding
+        self.word_count_inCluster[sense] += 1
+
+    def dpmeans(self, seq, w_idx, seq_idx, w_new, idx):
+        context_embedding = self.context_embedding(seq, seq_idx)
+        word = self.word_list[w_idx]
+        current_centers_idx = self.word_matrix_index[word]
+        min_dis = MAXI
+        sense = 0
+        if self.word_count_inCluster[current_centers_idx[0]] < 0.5:
+            sense = current_centers_idx[0]
+        else:
+            for cc in current_centers_idx:
+                if self.distance_type == 'COS':
+                    dist = cosine(self.cluster_center_matrix[cc]/self.word_count_inCluster[cc], context_embedding)
+                elif self.distance_type == 'EUC':
+                    dist = euclidean(self.cluster_center_matrix[cc]/self.word_count_inCluster[cc], context_embedding)
+                else:
+                    NotImplementedError()
+                if dist < min_dis:
+                    min_dis = dist
+                    sense = cc
+
+            if len(self.word_matrix_index[word]) < self.max_senses:
+                if min_dis > self.threshold:
+                    sense = self.num_active_we
+                    self.num_active_we += 1
+                    self.word_list.append(word)
+                    self.word_matrix_index[word].append(sense)
+                    self.wordvec_matrix[sense] = self.wordvec_matrix[w_idx]
+
+        w_new[idx] = sense
+        self.cluster_center_matrix[sense] += context_embedding
+        self.word_count_inCluster[sense] += 1
 
     def get_word_sense(self, seq, si):
         ceb = self.context_embedding(seq, si)
@@ -202,7 +378,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         mis = self.word_matrix_index[word]
         distances = numpy.linalg.norm(self.cluster_center_matrix[mis] - ceb, axis=1)  # FIXME: first time problem
         i = numpy.argmin(distances)
-        if distances[i] > self.mu:
+        if distances[i] > self.threshold:
             result = self.split_sense(word, mis[i])
         else:
             result = mis[i]
@@ -218,5 +394,131 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         return new_index
 
     def context_embedding(self, seq, si):
-        context_words_indices = seq[max(0, si - self.window_size): si + self.window_size]  # FIXME: remove center word
+        context_words_indices = seq[max(0, si - self.window_size): si] + seq[(si+1):si + self.window_size]
         return numpy.mean(self.weight_matrix[context_words_indices], axis=0)
+
+
+class ClusteringSgMultiEmbeddingModelMP(ClusteringSgNsEmbeddingModel):
+    def __init__(self, words_limit=5000, dimension=128, space_factor=4, window_size=5, neg_sample_rate=1., batch_size=8,
+                 max_senses=5, threshold=1., min_count=5, use_stop_words=False, learn_top_multi=None, skip_list=None,
+                 distance_type='COS', use_dpmeans=True, num_process = 2):
+        super(ClusteringSgMultiEmbeddingModelMP, self).__init__(words_limit=words_limit, dimension=dimension,
+                                                                space_factor=space_factor, window_size=window_size,
+                                                                neg_sample_rate=neg_sample_rate, batch_size=batch_size,
+                                                                max_senses=max_senses, threshold=threshold,
+                                                                min_count=min_count, use_stop_words=use_stop_words,
+                                                                learn_top_multi=learn_top_multi, skip_list=skip_list,
+                                                                distance_type=distance_type, use_dpmeans=use_dpmeans)
+        self.num_process = num_process
+
+    def clustering(self, seq, w_org, seq_indices):
+        l = len(seq_indices)
+        cluster_centers = manager.list(self.cluster_center_matrix)
+        weight_matrix = manager.list(self.weight_matrix)
+        word_count_inCluster = manager.list(self.word_count_inCluster)
+        word_matrix_index = manager.list([self.word_matrix_index])
+        word_list = manager.list(self.word_list)
+        seq_shared = manager.list(seq)
+        seq_indices_shared = manager.list(seq_indices)
+        wsize = manager.list([self.window_size])
+        dist_type = manager.list([self.distance_type])
+        learnable = manager.list(self.learnMultiVec)
+        max_senses = manager.list([self.max_senses])
+        threshold = manager.list([self.threshold])
+        pool = mp.Pool(processes=self.num_process)
+        if self.use_dpmeans:
+            f = partial(self.dpmeans_p, learnable, weight_matrix, cluster_centers, word_count_inCluster,
+                        word_matrix_index, word_list, seq_shared, seq_indices_shared, wsize, dist_type, max_senses,
+                        threshold)
+            results = pool.map(f, range(l))
+
+            current_length = self.num_active_we
+            for r, wo in zip(results, w_org):
+                sense = r[0]
+                if sense == current_length:
+                    word = self.word_list[wo]
+                    sense = self.num_active_we
+                    self.word_list.append(word)
+                    self.word_matrix_index[word].append(sense)
+                    self.wordvec_matrix[sense] = self.wordvec_matrix[wo]
+                    self.num_active_we += 1
+                if r[1] is not None:
+                    self.cluster_center_matrix[sense] += r[1]
+                    self.word_count_inCluster[sense] += 1
+
+        else:
+            f = partial(self.kmeans_p, learnable, weight_matrix, cluster_centers, word_count_inCluster,
+                        word_matrix_index, word_list, seq_shared, seq_indices_shared, wsize, dist_type)
+            results = pool.map(f, range(l))
+
+            for r, wo in zip(results, w_org):
+                sense = r[0]
+                if r[1] is not None:
+                    self.cluster_center_matrix[sense] += r[1]
+                    self.word_count_inCluster[sense] += 1
+
+        w_new = [r[0] for r in results]
+        pool.close()
+        pool.join()
+        return w_new
+
+    def kmeans_p(self, learnable, weight_matrix, cluster_centers, word_count_inCluster, word_matrix_index, word_list,
+                 seq_shared, seq_indices_shared, wsize, dist_type, i):
+        seq_idx = seq_indices_shared[i]
+        w_idx = seq_shared[seq_idx]
+        if learnable[w_idx]:
+            context_words_indices = seq_shared[max(0, seq_idx - wsize[0]): seq_idx] + \
+                                    seq_shared[(seq_idx+1):seq_idx + wsize[0]]
+            context_embedding = numpy.mean(weight_matrix[context_words_indices], axis=0)
+            current_centers_idx = word_matrix_index[0][word_list[w_idx]]
+            min_dis = MAXI
+            sense = 0
+            for cc in current_centers_idx:
+                if dist_type[0] == 'COS':
+                    dist = cosine(cluster_centers[cc]/word_count_inCluster[cc], context_embedding)
+                elif dist_type[0] == 'EUC':
+                    dist = euclidean(cluster_centers[cc]/word_count_inCluster[cc], context_embedding)
+                if dist < min_dis:
+                    min_dis = dist
+                    sense = cc
+        else:
+            sense = w_idx
+            context_embedding = None
+        return sense, context_embedding
+
+    def dpmeans_p(self, learnable, weight_matrix, cluster_centers, word_count_inCluster, word_matrix_index, word_list,
+                  seq_shared, seq_indices_shared, wsize, dist_type, max_senses, threshold, i):
+        seq_idx = seq_indices_shared[i]
+        w_idx = seq_shared[seq_idx]
+        if learnable[w_idx]:
+            context_words_indices = seq_shared[max(0, seq_idx - wsize[0]): seq_idx] + \
+                                    seq_shared[(seq_idx+1):seq_idx + wsize[0]]
+            context_embedding = weight_matrix[context_words_indices[0]]
+            for cc in context_words_indices[1:]:
+                context_embedding += weight_matrix[cc]
+            context_embedding /= len(context_words_indices)
+
+            word = word_list[w_idx]
+            current_centers_idx = word_matrix_index[0][word]
+            min_dis = MAXI
+            sense = 0
+
+            if word_count_inCluster[current_centers_idx[0]] < 0.5:
+                sense = current_centers_idx[0]
+            else:
+                for cc in current_centers_idx:
+                    if dist_type[0] == 'COS':
+                        dist = cosine(cluster_centers[cc]/word_count_inCluster[cc], context_embedding)
+                    elif dist_type[0] == 'EUC':
+                        dist = euclidean(cluster_centers[cc]/word_count_inCluster[cc], context_embedding)
+                    if dist < min_dis:
+                        min_dis = dist
+                        sense = cc
+
+                if len(word_matrix_index[0][word]) < max_senses[0]:
+                    if min_dis > threshold[0]:
+                        sense = len(word_list)
+        else:
+            sense = w_idx
+            context_embedding = None
+        return sense, context_embedding
