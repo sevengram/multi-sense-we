@@ -247,36 +247,6 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                 if self.word_list[i] in self.skip_list:
                     self.learnMultiVec[i] = False
 
-    def fit_bis(self, texts, nb_epoch=1, monitor=None, sampling=True):
-        batch_size = self.batch_size
-        for e in range(nb_epoch):
-            for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
-                if callable(monitor) and k % 20 == 0:
-                    c = numpy.array(couples)
-                    obj = self.trainer.get_objective_value(self.wordvec_matrix[c[:, 0]],
-                                                           self.weight_matrix[c[:, 1]],
-                                                           self.biases[c[:, 1]],
-                                                           labels)
-                    monitor(k, obj)
-                n = len(couples)
-                for i in range(0, n - batch_size, batch_size):
-                    # get real meaning
-                    wi = [self.get_word_sense(seq, si) for si in seq_indices[i:i + batch_size]]
-                    wj = [c[1] for c in couples[i:i + batch_size]]
-
-                    # trainer update
-                    self.trainer.update(self.wordvec_matrix,
-                                        self.weight_matrix,
-                                        self.biases,
-                                        labels[i:i + batch_size],
-                                        wi, wj)
-
-                    # update cluster centers
-                    ceb = [self.context_embedding(seq, si) for si in seq_indices[i:i + batch_size]]
-                    t = self.cluster_center_matrix[wi] * self.word_count_inCluster[wi][:, numpy.newaxis] + ceb
-                    self.word_count_inCluster[wi] += 1
-                    self.cluster_center_matrix[wi] = t / self.word_count_inCluster[wi][:, numpy.newaxis]
-
     def fit(self, texts, nb_epoch=1, monitor=None, sampling=True):
         batch_size = self.batch_size
         for e in range(nb_epoch):
