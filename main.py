@@ -24,7 +24,6 @@ def build_monitor(total_lines, monitor_values=None):
                 '%.2f%%, estimated remaining time: %d min, objective value: %f\r' % (
                     percent * 100, int(remain_time / 60), objval))
             sys.stdout.flush()
-
     return m
 
 
@@ -75,6 +74,7 @@ if __name__ == '__main__':
     parser.add_argument('--momentum_b', metavar='RATE', help='Momentum for bias', type=float, required=False)
     parser.add_argument('--optimizer', metavar='TYPE', help='Optimizer type', type=str, default='sgd')
     parser.add_argument('--objective', help='Save objective value or not', action='store_true')
+    parser.add_argument("--snapshot", help="Take snapshot while training", action='store_true')
     parser.add_argument("--test", help="Run a manual test after loading/training", action='store_true')
     args = parser.parse_args()
 
@@ -160,10 +160,15 @@ if __name__ == '__main__':
 
     if not args.test:
         print('start fitting model...')
+        snapshot_path_base = None
+        if args.snapshot:
+            params_path = build_filepath(sub_dir, args.tag, 'params')
+            snapshot_path_base = params_path[:-4]
         model.set_trainer(lr=args.lr, lr_b=args.lr_b, momentum=args.momentum, momentum_b=args.momentum_b,
                           optimizer=args.optimizer)
-        model.fit(text_generator(args.data), nb_epoch=args.epoch, monitor=build_monitor(file_lines(args.data),
-                                                                                        obj_trajectory))
+        model.fit(text_generator(args.data), nb_epoch=args.epoch,
+                  monitor=build_monitor(file_lines(args.data), obj_trajectory), take_snapshot=args.snapshot,
+                  snapshot_path=snapshot_path_base)
         print('\nfinish!')
 
     if args.save_params:
