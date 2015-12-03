@@ -20,6 +20,12 @@ class BaseHandler(tornado.web.RequestHandler):
 
 
 class AnswerHandler(BaseHandler):
+    def initialize(self, msg_queue):
+        self.msg_queue = msg_queue
+
     @tornado.gen.coroutine
     def post(self, *args, **kwargs):
-        pass
+        qid = self.get_argument('qid')
+        key = self.get_argument('key')
+        self.msg_queue.put({'qid': qid, 'key': key})
+        self.send_response()
