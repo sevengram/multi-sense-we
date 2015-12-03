@@ -37,7 +37,7 @@ def build_filepath(dirpath, tags, name):
     return "%s/%s_%s.pkl" % (dirpath, tags, name)
 
 def build_sub_dirpath(dirpath, tags):
-    return "%s/%s_%s" % (dirpath, tags, datetime.datetime.now().strftime('%m%d%H%M'))
+    return "%s/%s_%s" % (dirpath, tags, datetime.datetime.now().strftime('%m%d%H%M%S'))
 
 
 def file_lines(path):
@@ -84,7 +84,11 @@ if __name__ == '__main__':
     sub_dir = ""
     if args.output:
         sub_dir = build_sub_dirpath(args.output, args.tag)
-        os.makedirs(sub_dir)
+        if not os.path.exists(sub_dir):
+            os.makedirs(sub_dir)
+        else:
+            sub_dir += '_' + datetime.datetime.now().strftime('%S')
+            os.makedirs(sub_dir)
         f = open(sub_dir+"/arguments.txt", 'w')
         f.write("         data: " + str(args.data) + "\n")
         f.write("        vocab: " + str(args.vocab) + "\n")
