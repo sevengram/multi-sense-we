@@ -6,17 +6,14 @@ import sys
 import numpy
 from numpy import random, zeros, linalg
 from theano import tensor as T
-# from functools import partial
+from scipy.spatial.distance import cosine, euclidean
 
 import sequence
 import text
-# import pathos.multiprocessing as mp
-from multiprocessing import Manager
 from trainers import SGD, AdaGrad
-from scipy.spatial.distance import cosine, euclidean
 
 MAXI = sys.maxint
-manager = Manager()
+# manager = Manager()
 MONITOR_GAP = 20
 SNAPSHOT_GAP = 2000
 

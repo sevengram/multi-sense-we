@@ -51,7 +51,7 @@ class Tokenizer(object):
         limits = 0
         if self.min_count:
             for i in xrange(wsize):
-                if wcounts[wsize-i-1][1] >= self.min_count:
+                if wcounts[wsize - i - 1][1] >= self.min_count:
                     limits = i
                     break
             wcounts = wcounts[:limits]
@@ -74,7 +74,7 @@ class Tokenizer(object):
 
             Yields individual sequences.
         """
-        for text in texts:
+        for text in texts() if callable(texts) else texts:
             seq = text_to_word_sequence(text, self.filters, self.lower, self.split)
             vect = []
             for w in seq:
