@@ -61,7 +61,7 @@ if __name__ == '__main__':
     parser.add_argument('--wordvec', metavar='FILE', help='File to load word vectors', type=str, required=False)
     parser.add_argument('--output', metavar='FILE', help='Path to save data', type=str, required=False)
     parser.add_argument('--tag', metavar='FILE', help='Tags to give key parameters', type=str, default='')
-    parser.add_argument('--save_params', metavar='FILE', help='Path to save parameters', type=str, required=False)
+    parser.add_argument('--save_params', help='Whether save parameters', action='store_true')
     parser.add_argument('--load_params', metavar='FILE', help='Path to load parameters', type=str, required=False)
     parser.add_argument('--batch', metavar='SIZE', help='Batch size', type=int, default=8)
     parser.add_argument('--learnMultiTop', metavar='SIZE', help='Only learn multiple vectors for top V words',
