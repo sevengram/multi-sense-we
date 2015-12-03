@@ -160,6 +160,7 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
 
     def fit(self, texts, nb_epoch=1, monitor=None, sampling=True, take_snapshot=False, snapshot_path=None):
         for e in range(nb_epoch):
+            print "Epoch", e, "..."
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 if callable(monitor) and k == 0:
                     c = numpy.array(couples)
@@ -185,6 +186,7 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                     monitor(k, obj)
                 if take_snapshot and k % SNAPSHOT_GAP == 0 and k is not 0:
                     self.dump(snapshot_path + '_' + str(k) + '.pkl')
+            print "\n"
 
 
 class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
@@ -268,6 +270,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
     def fit(self, texts, nb_epoch=1, monitor=None, sampling=True, take_snapshot=False, snapshot_path=None):
         batch_size = self.batch_size
         for e in range(nb_epoch):
+            print "Epoch", e, "..."
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 if callable(monitor) and k == 0:
                     c = numpy.array(couples)
@@ -302,6 +305,8 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                     monitor(k, obj)
                 if take_snapshot and k % SNAPSHOT_GAP == 0 and k is not 0:
                     self.dump(snapshot_path + '_' + str(k) + '.pkl')
+
+            print "\n"
 
     def clustering(self, seq, seq_indices):
         wi_new = []
