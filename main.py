@@ -34,8 +34,11 @@ def text_generator(path):
             yield l
 
 
-def build_filepath(dirpath, name):
-    return "%s%s_%s.pkl" % (dirpath, name, datetime.datetime.now().strftime('%m%d%H%M'))
+def build_filepath(dirpath, tags, name):
+    return "%s/%s_%s.pkl" % (dirpath, tags, name)
+
+def build_sub_dirpath(dirpath, tags):
+    return "%s/%s_%s" % (dirpath, tags, datetime.datetime.now().strftime('%m%d%H%M'))
 
 
 def file_lines(path):
@@ -57,11 +60,14 @@ if __name__ == '__main__':
     parser.add_argument('--vocab', metavar='FILE', help='File to load vocab', type=str, required=False)
     parser.add_argument('--wordvec', metavar='FILE', help='File to load word vectors', type=str, required=False)
     parser.add_argument('--output', metavar='FILE', help='Path to save data', type=str, required=False)
+    parser.add_argument('--tag', metavar='FILE', help='Tags to give key parameters', type=str, default='')
     parser.add_argument('--save_params', metavar='FILE', help='Path to save parameters', type=str, required=False)
     parser.add_argument('--load_params', metavar='FILE', help='Path to load parameters', type=str, required=False)
     parser.add_argument('--batch', metavar='SIZE', help='Batch size', type=int, default=8)
     parser.add_argument('--learnMultiTop', metavar='SIZE', help='Only learn multiple vectors for top V words',
                         type=int, default=4000)
+    parser.add_argument('--skiplist', metavar='FILE', help='Use skip list to skip single sense words', type=str,
+                        required=False)
     parser.add_argument('--epoch', metavar='COUNT', help='Epoch count', type=int, default=1)
     parser.add_argument('--lr', metavar='RATE', help='Learning rate', type=float, default=.1)
     parser.add_argument('--lr_b', metavar='RATE', help='Learning rate for bias', type=float, required=False)
@@ -75,6 +81,35 @@ if __name__ == '__main__':
     if args.output and not os.path.exists(args.output):
         os.makedirs(args.output)
 
+    sub_dir = ""
+    if args.output:
+        sub_dir = build_sub_dirpath(args.output, args.tag)
+        os.makedirs(sub_dir)
+        f = open(sub_dir+"/arguments.txt", 'w')
+        f.write("         data: " + str(args.data) + "\n")
+        f.write("        vocab: " + str(args.vocab) + "\n")
+        f.write("        limit: " + str(args.limit) + "\n")
+        f.write("    min_count: " + str(args.min_count) + "\n")
+        f.write("       window: " + str(args.window) + "\n")
+        f.write("        model: " + str(args.model) + "\n")
+        f.write("  load_params: " + str(args.load_params) + "\n")
+        f.write("        epoch: " + str(args.epoch) + "\n")
+        f.write("        batch: " + str(args.batch) + "\n")
+        f.write("           lr: " + str(args.lr) + "\n")
+        f.write("         lr_b: " + str(args.lr_b) + "\n")
+        f.write("     momentum: " + str(args.momentum) + "\n")
+        f.write("   momentum_b: " + str(args.momentum_b) + "\n")
+        f.write("    optimizer: " + str(args.optimizer) + "\n")
+        f.write("    dimension: " + str(args.dimension) + "\n")
+        f.write("learnMultiTop: " + str(args.learnMultiTop) + "\n")
+        f.write("     skiplist: " + str(args.skiplist) + "\n")
+        f.write("      wordvec: " + str(args.wordvec) + "\n")
+        f.close()
+
+    skip_list = None
+    if args.skiplist:
+        skip_list = cPickle.load(open(args.skiplist, 'rb'))
+
     model = None
     # if args.model == 'CLMP':
     #     model = ClusteringSgMultiEmbeddingModelMP(words_limit=args.limit, dimension=args.dimension,
@@ -82,7 +117,8 @@ if __name__ == '__main__':
     #                                               learn_top_multi=args.learnMultiTop)
     if args.model == 'CL':
         model = ClusteringSgNsEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window,
-                                             batch_size=args.batch, learn_top_multi=args.learnMultiTop)
+                                             batch_size=args.batch, learn_top_multi=args.learnMultiTop,
+                                             skip_list=skip_list)
     elif args.model == 'SG':
         model = SkipGramNegSampEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window,
                                               batch_size=args.batch, min_count=args.min_count)
@@ -105,9 +141,9 @@ if __name__ == '__main__':
 
     if args.output and not args.vocab:
         print('saving vocab...')
-        model.save_tokenizer(build_filepath(args.output, 'vocab'))
-        model.save_word_list(build_filepath(args.output, 'word_list'))
-        model.save_word_index(build_filepath(args.output, 'word_index'))
+        model.save_tokenizer(build_filepath(sub_dir, args.tag, 'vocab'))
+        model.save_word_list(build_filepath(sub_dir, args.tag, 'word_list'))
+        model.save_word_index(build_filepath(sub_dir, args.tag, 'word_index'))
 
     if args.objective:
         obj_trajectory = []
@@ -126,20 +162,21 @@ if __name__ == '__main__':
         print('start fitting model...')
         model.set_trainer(lr=args.lr, lr_b=args.lr_b, momentum=args.momentum, momentum_b=args.momentum_b,
                           optimizer=args.optimizer)
-        model.fit(text_generator(args.data), nb_epoch=args.epoch, monitor=build_monitor(file_lines(args.data), obj_trajectory))
+        model.fit(text_generator(args.data), nb_epoch=args.epoch, monitor=build_monitor(file_lines(args.data),
+                                                                                        obj_trajectory))
         print('\nfinish!')
 
     if args.save_params:
         print('saveing all parameters...')
-        model.dump(build_filepath(args.save_params, 'params'))
+        model.dump(build_filepath(sub_dir, args.tag, 'params'))
 
     if args.output and not args.wordvec and not args.save_params:
         print('saving word vectors...')
-        model.save_word_vectors(build_filepath(args.output, 'word_vec'))
-        model.save_weight_matrix(build_filepath(args.output, 'weights'))
+        model.save_word_vectors(build_filepath(sub_dir, args.tag, 'word_vec'))
+        model.save_weight_matrix(build_filepath(sub_dir, args.tag, 'weights'))
 
     if args.output and args.objective:
-        cPickle.dump(obj_trajectory, open(build_filepath(args.output, 'objective'), "wb"))
+        cPickle.dump(obj_trajectory, open(build_filepath(sub_dir, args.tag, 'objective'), "wb"))
 
     print('end time: %s' % time.ctime())
     print('you may reload the vocab and model, and add --test to run a manual test.')

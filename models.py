@@ -190,6 +190,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         self.learn_top_multi = learn_top_multi
         self.skip_list = skip_list
         self.learnMultiVec = []
+        self.sense_word_list = []
         self.distance_type = distance_type
         self.num_active_we = 0
         self.use_dpmeans = use_dpmeans
@@ -203,7 +204,8 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                       self.biases,
                       self.cluster_center_matrix,
                       self.word_count_inCluster,
-                      self.word_matrix_index]
+                      self.word_matrix_index,
+                      self.sense_word_list]
             cPickle.dump(params, open(path, 'wb'))
 
     def load(self, path):
@@ -222,58 +224,70 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
             self.cluster_center_matrix = params[3]
             self.word_count_inCluster = params[4]
             self.word_matrix_index = params[5]
+            self.sense_word_list = params[6]
 
     def build_vocab(self, texts):
         super(ClusteringSgNsEmbeddingModel, self).build_vocab(texts)
+        self.sense_word_list = self.word_list
         self.set_learn_vector()
 
     def load_vocab(self, path):
         super(ClusteringSgNsEmbeddingModel, self).load_vocab(path)
+        self.sense_word_list = self.word_list
         self.set_learn_vector()
 
     def set_learn_vector(self):
         self.num_active_we = self.words_limit
         length = len(self.word_list)
         self.learnMultiVec = [True]*length
-        if self.learn_top_multi is not None and self.learn_top_multi < length:
-            self.learnMultiVec[self.learn_top_multi:] = [False]*(length - self.learn_top_multi)
-            length = self.learn_top_multi
-
         if self.skip_list is not None:
             for i in xrange(length):
                 if self.word_list[i] in self.skip_list:
                     self.learnMultiVec[i] = False
+        if self.learn_top_multi is not None and self.learn_top_multi < sum(self.learnMultiVec):
+            count = 0
+            idx = 0
+            while count < self.learn_top_multi - 1:
+                if self.learnMultiVec[idx]:
+                    self.learnMultiVec[idx] = False
+                    count += 1
+                idx += 1
 
     def fit(self, texts, nb_epoch=1, monitor=None, sampling=True):
         batch_size = self.batch_size
         for e in range(nb_epoch):
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
-                if callable(monitor) and k % 20 == 0:
+                if callable(monitor) and k == 0:
                     c = numpy.array(couples)
                     obj = self.trainer.get_objective_value(self.wordvec_matrix[c[:, 0]],
                                                            self.weight_matrix[c[:, 1]],
                                                            self.biases[c[:, 1]],
                                                            labels)
                     monitor(k, obj)
+
                 n = len(couples)
+                wi_all = []
+                last = n
                 for i in range(0, n - batch_size, batch_size):
                     # get real meaning
                     wi = self.clustering(seq, seq_indices[i:i + batch_size])
                     wj = [c[1] for c in couples[i:i + batch_size]]
+                    wi_all += wi
 
-                    # if callable(monitor) and i == 0 and k % 20 == 0:
-                    #     obj = self.trainer.get_objective_value(self.wordvec_matrix[wi],
-                    #                                        self.weight_matrix[wj],
-                    #                                        self.biases[wj],
-                    #                                        labels[i:i+batch_size])
-                    #     monitor(k, obj)
-
-                    # trainer update
                     self.trainer.update(self.wordvec_matrix,
                                         self.weight_matrix,
                                         self.biases,
                                         labels[i:i + batch_size],
                                         wi, wj)
+                    last = i + batch_size
+                if callable(monitor) and k % 20 == 0 and k is not 0:
+                    c = numpy.array(couples)
+                    wj = c[:last, 1]
+                    obj = self.trainer.get_objective_value(self.wordvec_matrix[wi_all],
+                                                           self.weight_matrix[wj],
+                                                           self.biases[wj],
+                                                           labels[:last])
+                    monitor(k, obj)
 
     def clustering(self, seq, seq_indices):
         wi_new = []
@@ -285,9 +299,19 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                 wi_new.append(wi)
         return wi_new
 
+    def find_sense_seq(self, seq, seq_indices):
+        wi_new = []
+        for si in seq_indices:
+            wi = seq[si]
+            if self.learnMultiVec[wi]:
+                wi_new.append(self.find_sense(seq, si))
+            else:
+                wi_new.append(wi)
+        return wi_new
+
     def kmeans(self, seq, si):
         context_embedding = self.context_embedding(seq, si)
-        word = self.word_list[seq[si]]
+        word = self.sense_word_list[seq[si]]
         current_centers_idx = self.word_matrix_index[word]
         min_dis = MAXI
         sense = 0
@@ -303,9 +327,30 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         self.word_count_inCluster[sense] += 1
         return sense
 
+    def find_sense(self, seq, si):
+        context_embedding = self.context_embedding(seq, si)
+        word = self.sense_word_list[seq[si]]
+        current_centers_idx = self.word_matrix_index[word]
+        min_dis = MAXI
+        sense = 0
+        if self.word_count_inCluster[current_centers_idx[0]] < 0.5:
+            sense = current_centers_idx[0]
+        else:
+            for cc in current_centers_idx:
+                if self.distance_type == 'COS':
+                    dist = cosine(self.cluster_center_matrix[cc]/self.word_count_inCluster[cc], context_embedding)
+                elif self.distance_type == 'EUC':
+                    dist = euclidean(self.cluster_center_matrix[cc]/self.word_count_inCluster[cc], context_embedding)
+                else:
+                    NotImplementedError()
+                if dist < min_dis:
+                    min_dis = dist
+                    sense = cc
+        return sense
+
     def dpmeans(self, seq, si):
         context_embedding = self.context_embedding(seq, si)
-        word = self.word_list[seq[si]]
+        word = self.sense_word_list[seq[si]]
         current_centers_idx = self.word_matrix_index[word]
         min_dis = MAXI
         sense = 0
@@ -327,7 +372,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                 if min_dis > self.threshold:
                     sense = self.num_active_we
                     self.num_active_we += 1
-                    self.word_list.append(word)
+                    self.sense_word_list.append(word)
                     self.word_matrix_index[word].append(sense)
                     self.wordvec_matrix[sense] = self.wordvec_matrix[seq[si]]
 
@@ -359,7 +404,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 #         weight_matrix = manager.list(self.weight_matrix)
 #         word_count_inCluster = manager.list(self.word_count_inCluster)
 #         word_matrix_index = manager.list([self.word_matrix_index])
-#         word_list = manager.list(self.word_list)
+#         sense_word_list = manager.list(self.sense_word_list)
 #         seq_shared = manager.list(seq)
 #         seq_indices_shared = manager.list(seq_indices)
 #         wsize = manager.list([self.window_size])
@@ -370,7 +415,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 #         pool = mp.Pool(processes=self.num_process)
 #         if self.use_dpmeans:
 #             f = partial(self.dpmeans_p, learnable, weight_matrix, cluster_centers, word_count_inCluster,
-#                         word_matrix_index, word_list, seq_shared, seq_indices_shared, wsize, dist_type, max_senses,
+#                         word_matrix_index, sense_word_list, seq_shared, seq_indices_shared, wsize, dist_type, max_senses,
 #                         threshold)
 #             results = pool.map(f, range(l))
 #
@@ -378,9 +423,9 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 #             for r, wo in zip(results, w_org):
 #                 sense = r[0]
 #                 if sense == current_length:
-#                     word = self.word_list[wo]
+#                     word = self.sense_word_list[wo]
 #                     sense = self.num_active_we
-#                     self.word_list.append(word)
+#                     self.sense_word_list.append(word)
 #                     self.word_matrix_index[word].append(sense)
 #                     self.wordvec_matrix[sense] = self.wordvec_matrix[wo]
 #                     self.num_active_we += 1
@@ -390,7 +435,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 #
 #         else:
 #             f = partial(self.kmeans_p, learnable, weight_matrix, cluster_centers, word_count_inCluster,
-#                         word_matrix_index, word_list, seq_shared, seq_indices_shared, wsize, dist_type)
+#                         word_matrix_index, sense_word_list, seq_shared, seq_indices_shared, wsize, dist_type)
 #             results = pool.map(f, range(l))
 #
 #             for r, wo in zip(results, w_org):
@@ -404,7 +449,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 #         pool.join()
 #         return w_new
 #
-#     def kmeans_p(self, learnable, weight_matrix, cluster_centers, word_count_inCluster, word_matrix_index, word_list,
+#     def kmeans_p(self, learnable, weight_matrix, cluster_centers, word_count_inCluster, word_matrix_index, sense_word_list,
 #                  seq_shared, seq_indices_shared, wsize, dist_type, i):
 #         seq_idx = seq_indices_shared[i]
 #         w_idx = seq_shared[seq_idx]
@@ -412,7 +457,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 #             context_words_indices = seq_shared[max(0, seq_idx - wsize[0]): seq_idx] + \
 #                                     seq_shared[(seq_idx+1):seq_idx + wsize[0]]
 #             context_embedding = numpy.mean(weight_matrix[context_words_indices], axis=0)
-#             current_centers_idx = word_matrix_index[0][word_list[w_idx]]
+#             current_centers_idx = word_matrix_index[0][sense_word_list[w_idx]]
 #             min_dis = MAXI
 #             sense = 0
 #             for cc in current_centers_idx:
@@ -428,7 +473,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 #             context_embedding = None
 #         return sense, context_embedding
 #
-#     def dpmeans_p(self, learnable, weight_matrix, cluster_centers, word_count_inCluster, word_matrix_index, word_list,
+#     def dpmeans_p(self, learnable, weight_matrix, cluster_centers, word_count_inCluster, word_matrix_index, sense_word_list,
 #                   seq_shared, seq_indices_shared, wsize, dist_type, max_senses, threshold, i):
 #         seq_idx = seq_indices_shared[i]
 #         w_idx = seq_shared[seq_idx]
@@ -440,7 +485,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 #                 context_embedding += weight_matrix[cc]
 #             context_embedding /= len(context_words_indices)
 #
-#             word = word_list[w_idx]
+#             word = sense_word_list[w_idx]
 #             current_centers_idx = word_matrix_index[0][word]
 #             min_dis = MAXI
 #             sense = 0
@@ -459,7 +504,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 #
 #                 if len(word_matrix_index[0][word]) < max_senses[0]:
 #                     if min_dis > threshold[0]:
-#                         sense = len(word_list)
+#                         sense = len(sense_word_list)
 #         else:
 #             sense = w_idx
 #             context_embedding = None
