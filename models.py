@@ -17,6 +17,8 @@ from scipy.spatial.distance import cosine, euclidean
 
 MAXI = sys.maxint
 manager = Manager()
+MONITOR_GAP = 20
+SNAPSHOT_GAP = 2000
 
 
 class WordEmbeddingModel(object):
@@ -61,7 +63,9 @@ class WordEmbeddingModel(object):
         if path:
             params = [self.wordvec_matrix,
                       self.weight_matrix,
-                      self.biases]
+                      self.biases,
+                      self.word_matrix_index,
+                      self.word_list]
             cPickle.dump(params, open(path, "wb"))
 
     def load(self, path):
@@ -69,6 +73,8 @@ class WordEmbeddingModel(object):
         self.wordvec_matrix = params[0]
         self.weight_matrix = params[1]
         self.biases = params[2]
+        self.word_matrix_index = params[3]
+        self.word_list = params[4]
 
     def load_word_vectors(self, path):
         self.wordvec_matrix = cPickle.load(open(path, 'rb'))
@@ -155,10 +161,10 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
             raise NotImplementedError()
         self.trainer.compile(x, w, b, y, obj)
 
-    def fit(self, texts, nb_epoch=1, monitor=None, sampling=True):
+    def fit(self, texts, nb_epoch=1, monitor=None, sampling=True, take_snapshot=False, snapshot_path=None):
         for e in range(nb_epoch):
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
-                if callable(monitor) and k % 20 == 0:
+                if callable(monitor) and k == 0:
                     c = numpy.array(couples)
                     obj = self.trainer.get_objective_value(self.wordvec_matrix[c[:, 0]],
                                                            self.weight_matrix[c[:, 1]],
@@ -173,6 +179,15 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                                         self.biases,
                                         labels[i:i + self.batch_size],
                                         wi, wj)
+                if callable(monitor) and k % MONITOR_GAP == 0 and k is not 0:
+                    c = numpy.array(couples)
+                    obj = self.trainer.get_objective_value(self.wordvec_matrix[c[:, 0]],
+                                                           self.weight_matrix[c[:, 1]],
+                                                           self.biases[c[:, 1]],
+                                                           labels)
+                    monitor(k, obj)
+                if take_snapshot and k % SNAPSHOT_GAP == 0 and k is not 0:
+                    self.dump(snapshot_path + '_' + str(k) + '.pkl')
 
 
 class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
@@ -213,7 +228,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         assert len(params[1]) == self.words_limit, "size dont match, %d vs. %d" % (len(params[1]), self.words_limit)
         self.weight_matrix = params[1]
         self.biases = params[2]
-        if len(params) == 3:
+        if len(params) == 5:
             assert len(params[0]) == self.words_limit, "size dont match, %d vs. %d" % (len(params[0]), self.words_limit)
             self.wordvec_matrix[:self.words_limit] = params[0]
         else:
@@ -253,7 +268,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                     count += 1
                 idx += 1
 
-    def fit(self, texts, nb_epoch=1, monitor=None, sampling=True):
+    def fit(self, texts, nb_epoch=1, monitor=None, sampling=True, take_snapshot=False, snapshot_path=None):
         batch_size = self.batch_size
         for e in range(nb_epoch):
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
@@ -280,7 +295,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                                         labels[i:i + batch_size],
                                         wi, wj)
                     last = i + batch_size
-                if callable(monitor) and k % 20 == 0 and k is not 0:
+                if callable(monitor) and k % MONITOR_GAP == 0 and k is not 0:
                     c = numpy.array(couples)
                     wj = c[:last, 1]
                     obj = self.trainer.get_objective_value(self.wordvec_matrix[wi_all],
@@ -288,6 +303,8 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                                                            self.biases[wj],
                                                            labels[:last])
                     monitor(k, obj)
+                if take_snapshot and k % SNAPSHOT_GAP == 0 and k is not 0:
+                    self.dump(snapshot_path + '_' + str(k) + '.pkl')
 
     def clustering(self, seq, seq_indices):
         wi_new = []
