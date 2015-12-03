@@ -27,14 +27,17 @@ def build_monitor(total_lines, monitor_values=None):
     return m
 
 
-def text_generator(path):
-    with open(path) as f:
-        for l in f:
-            yield l
+def text_builder(path):
+    def g():
+        with open(path) as f:
+            for l in f:
+                yield l
+    return g
 
 
 def build_filepath(dirpath, tags, name):
     return "%s/%s_%s.pkl" % (dirpath, tags, name)
+
 
 def build_sub_dirpath(dirpath, tags):
     return "%s/%s_%s" % (dirpath, tags, datetime.datetime.now().strftime('%m%d%H%M%S'))
@@ -141,7 +144,7 @@ if __name__ == '__main__':
     if args.vocab:
         model.load_vocab(args.vocab)
     else:
-        model.build_vocab(text_generator(args.data))
+        model.build_vocab(text_builder(args.data)())
 
     if args.output and not args.vocab:
         print('saving vocab...')
@@ -170,7 +173,7 @@ if __name__ == '__main__':
             snapshot_path_base = params_path[:-4]
         model.set_trainer(lr=args.lr, lr_b=args.lr_b, momentum=args.momentum, momentum_b=args.momentum_b,
                           optimizer=args.optimizer)
-        model.fit(text_generator(args.data), nb_epoch=args.epoch,
+        model.fit(text_builder(args.data), nb_epoch=args.epoch,
                   monitor=build_monitor(file_lines(args.data), obj_trajectory), take_snapshot=args.snapshot,
                   snapshot_path=snapshot_path_base)
         print('\nfinish!')
