@@ -186,6 +186,10 @@ if __name__ == '__main__':
 
     if args.output and args.objective:
         cPickle.dump(obj_trajectory, open(build_filepath(sub_dir, args.tag, 'objective'), "wb"))
+        f = open(sub_dir + '/' + args.tag + '_objective.txt', 'w')
+        for obj in obj_trajectory:
+            f.write(str(obj) + '\n')
+        f.close()
 
     print('end time: %s' % time.ctime())
     print('you may reload the vocab and model, and add --test to run a manual test.')
