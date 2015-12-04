@@ -78,6 +78,7 @@ if __name__ == '__main__':
     parser.add_argument('--optimizer', metavar='TYPE', help='Optimizer type', type=str, default='sgd')
     parser.add_argument('--objective', help='Save objective value or not', action='store_true')
     parser.add_argument("--snapshot", help="Take snapshot while training", action='store_true')
+    parser.add_argument('--save_vec', help='Save word vectors and context vectors', action='store_true')
     parser.add_argument("--test", help="Run a manual test after loading/training", action='store_true')
     args = parser.parse_args()
 
@@ -182,7 +183,7 @@ if __name__ == '__main__':
         print('saveing all parameters...')
         model.dump(build_filepath(sub_dir, args.tag, 'params'))
 
-    if args.output and not args.wordvec and not args.save_params:
+    if args.output and args.save_vec and not args.save_params:
         print('saving word vectors...')
         model.save_word_vectors(build_filepath(sub_dir, args.tag, 'word_vec'))
         model.save_weight_matrix(build_filepath(sub_dir, args.tag, 'weights'))
