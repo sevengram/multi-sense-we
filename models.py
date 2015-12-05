@@ -100,6 +100,19 @@ class WordEmbeddingModel(object):
     def _sequentialize(self, texts, **kwargs):
         raise NotImplementedError()
 
+    # def nearest_words(self, word, limit=20):
+    #     if self.wordvec_matrix is None:
+    #         print('load vocab and model first!')
+    #         return None
+    #     word_index = self.word_matrix_index.get(word)[0]
+    #     if word_index is None or word_index >= self.wordvec_matrix.shape[0]:
+    #         print('can\'t find this word!')
+    #         return None
+    #     else:
+    #         d = [linalg.norm(self.wordvec_matrix[word_index] - v) for v in self.wordvec_matrix]
+    #         nearest_indices = numpy.argpartition(d, limit)[:limit]
+    #         return {self.word_list[i]: d[i] for i in nearest_indices}
+
     def nearest_words(self, word, limit=20):
         if self.wordvec_matrix is None:
             print('load vocab and model first!')
@@ -109,9 +122,13 @@ class WordEmbeddingModel(object):
             print('can\'t find this word!')
             return None
         else:
-            d = [linalg.norm(self.wordvec_matrix[word_index] - v) for v in self.wordvec_matrix]
-            nearest_indices = numpy.argpartition(d, limit)[:limit]
-            return {self.word_list[i]: d[i] for i in nearest_indices}
+            d = []
+            for idx, v in enumerate(self.wordvec_matrix):
+                d.append((cosine(self.wordvec_matrix[word_index]), v))
+
+            d.sort(key=lambda x : x[0])
+            nearest_indices = d[:limit]
+            return {self.word_list[j]: i for i, j in nearest_indices}
 
 
 class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
