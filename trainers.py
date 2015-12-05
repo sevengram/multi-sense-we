@@ -7,7 +7,10 @@ from numpy import zeros
 class Trainer(object):
     def __init__(self, lr=.1, lr_b=None):
         self.lr = lr
-        self.lr_b = lr_b or lr
+        if self.lr_b is None:
+            self.lr_b = lr
+        else:
+            self.lr_b = lr_b
         self.gradient = None
         self.objective = None
 
