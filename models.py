@@ -124,7 +124,7 @@ class WordEmbeddingModel(object):
         else:
             d = []
             for idx, v in enumerate(self.wordvec_matrix):
-                d.append((cosine(self.wordvec_matrix[word_index]), v))
+                d.append((cosine(self.wordvec_matrix[word_index], v), idx))
 
             d.sort(key=lambda x : x[0])
             nearest_indices = d[:limit]
