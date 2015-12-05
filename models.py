@@ -31,7 +31,6 @@ class WordEmbeddingModel(object):
         self.biases = None
         self.min_count = min_count
         self.use_stop_words = use_stop_words
-        self._init_values()
 
     def _init_values(self):
         factor = self.space_factor
@@ -55,6 +54,7 @@ class WordEmbeddingModel(object):
         self.word_list = self.tokenizer.provide_word_list()
         for i in range(len(self.word_list)):
             self.word_matrix_index[self.word_list[i]] = [i]
+        self._init_values()
 
     def dump(self, path):
         if path:
@@ -70,8 +70,6 @@ class WordEmbeddingModel(object):
         self.wordvec_matrix = params[0]
         self.weight_matrix = params[1]
         self.biases = params[2]
-        self.word_matrix_index = params[3]
-        self.word_list = params[4]
 
     def load_word_vectors(self, path):
         self.wordvec_matrix = cPickle.load(open(path, 'rb'))
@@ -102,6 +100,19 @@ class WordEmbeddingModel(object):
     def _sequentialize(self, texts, **kwargs):
         raise NotImplementedError()
 
+    # def nearest_words(self, word, limit=20):
+    #     if self.wordvec_matrix is None:
+    #         print('load vocab and model first!')
+    #         return None
+    #     word_index = self.word_matrix_index.get(word)[0]
+    #     if word_index is None or word_index >= self.wordvec_matrix.shape[0]:
+    #         print('can\'t find this word!')
+    #         return None
+    #     else:
+    #         d = [linalg.norm(self.wordvec_matrix[word_index] - v) for v in self.wordvec_matrix]
+    #         nearest_indices = numpy.argpartition(d, limit)[:limit]
+    #         return {self.word_list[i]: d[i] for i in nearest_indices}
+
     def nearest_words(self, word, limit=20):
         if self.wordvec_matrix is None:
             print('load vocab and model first!')
@@ -111,9 +122,13 @@ class WordEmbeddingModel(object):
             print('can\'t find this word!')
             return None
         else:
-            d = [linalg.norm(self.wordvec_matrix[word_index] - v) for v in self.wordvec_matrix]
-            nearest_indices = numpy.argpartition(d, limit)[:limit]
-            return {self.word_list[i]: d[i] for i in nearest_indices}
+            d = []
+            for idx, v in enumerate(self.wordvec_matrix):
+                d.append((cosine(self.wordvec_matrix[word_index], v), idx))
+
+            d.sort(key=lambda x : x[0])
+            nearest_indices = d[:limit]
+            return {self.word_list[j]: i for i, j in nearest_indices}
 
 
 class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
@@ -160,6 +175,7 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
 
     def fit(self, texts, nb_epoch=1, monitor=None, sampling=True, take_snapshot=False, snapshot_path=None):
         for e in range(nb_epoch):
+            print "Epoch", e, "..."
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 if callable(monitor) and k == 0:
                     c = numpy.array(couples)
@@ -185,6 +201,7 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                     monitor(k, obj)
                 if take_snapshot and k % SNAPSHOT_GAP == 0 and k is not 0:
                     self.dump(snapshot_path + '_' + str(k) + '.pkl')
+            print "\n"
 
 
 class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
@@ -268,6 +285,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
     def fit(self, texts, nb_epoch=1, monitor=None, sampling=True, take_snapshot=False, snapshot_path=None):
         batch_size = self.batch_size
         for e in range(nb_epoch):
+            print "Epoch", e, "..."
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 if callable(monitor) and k == 0:
                     c = numpy.array(couples)
@@ -302,6 +320,8 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                     monitor(k, obj)
                 if take_snapshot and k % SNAPSHOT_GAP == 0 and k is not 0:
                     self.dump(snapshot_path + '_' + str(k) + '.pkl')
+
+            print "\n"
 
     def clustering(self, seq, seq_indices):
         wi_new = []
