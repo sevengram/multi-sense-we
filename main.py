@@ -57,6 +57,7 @@ if __name__ == '__main__':
     parser.add_argument('--data', metavar='FILE', help='data file', type=str, required=False)
     parser.add_argument('--dimension', metavar='N', help='Dimension size', type=int, default=128)
     parser.add_argument('--window', metavar='SIZE', help='Window size', type=int, default=5)
+    parser.add_argument('--neg', metavar='LIMIT', help='negative sample rate', type=int, default=1)
     parser.add_argument('--limit', metavar='LIMIT', help='Words limit', type=int, default=40000)
     parser.add_argument('--min_count', metavar='COUNT', help='Minimum count using', type=int, required=False)
     parser.add_argument('--vocab', metavar='FILE', help='File to load vocab', type=str, required=False)
@@ -99,6 +100,7 @@ if __name__ == '__main__':
         f.write("        limit: " + str(args.limit) + "\n")
         f.write("    min_count: " + str(args.min_count) + "\n")
         f.write("       window: " + str(args.window) + "\n")
+        f.write("          neg: " + str(args.neg) + "\n")
         f.write("        model: " + str(args.model) + "\n")
         f.write("  load_params: " + str(args.load_params) + "\n")
         f.write("        epoch: " + str(args.epoch) + "\n")
@@ -126,10 +128,10 @@ if __name__ == '__main__':
     if args.model == 'CL':
         model = ClusteringSgNsEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window,
                                              batch_size=args.batch, learn_top_multi=args.learnMultiTop,
-                                             skip_list=skip_list)
+                                             skip_list=skip_list, neg_sample_rate=args.neg)
     elif args.model == 'SG':
         model = SkipGramNegSampEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window,
-                                              batch_size=args.batch, min_count=args.min_count)
+                                              batch_size=args.batch, min_count=args.min_count, neg_sample_rate=args.neg)
     else:
         NotImplementedError()
     if not args.vocab and not args.data:
