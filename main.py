@@ -113,9 +113,7 @@ if __name__ == '__main__':
         f.write("      wordvec: " + str(args.wordvec) + "\n")
         f.close()
 
-    skip_list = None
-    if args.skiplist:
-        skip_list = cPickle.load(open(args.skiplist, 'rb'))
+    skip_list = cPickle.load(open(args.skiplist, 'rb')) if args.skiplist else None
 
     model = None
     # if args.model == 'CLMP':
@@ -131,6 +129,7 @@ if __name__ == '__main__':
                                               batch_size=args.batch, min_count=args.min_count)
     else:
         NotImplementedError()
+
     if not args.vocab and not args.data:
         print('invalid vocab input')
     if not args.wordvec and not args.data:
@@ -152,10 +151,7 @@ if __name__ == '__main__':
         model.save_word_list(build_filepath(sub_dir, args.tag, 'word_list'))
         model.save_word_index(build_filepath(sub_dir, args.tag, 'word_index'))
 
-    if args.objective:
-        obj_trajectory = []
-    else:
-        obj_trajectory = None
+    obj_trajectory = [] if args.objective else None
 
     if args.wordvec:
         print('start loading word vectors...')
