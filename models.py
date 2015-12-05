@@ -31,7 +31,6 @@ class WordEmbeddingModel(object):
         self.biases = None
         self.min_count = min_count
         self.use_stop_words = use_stop_words
-        self._init_values()
 
     def _init_values(self):
         factor = self.space_factor
@@ -55,6 +54,7 @@ class WordEmbeddingModel(object):
         self.word_list = self.tokenizer.provide_word_list()
         for i in range(len(self.word_list)):
             self.word_matrix_index[self.word_list[i]] = [i]
+        self._init_values()
 
     def dump(self, path):
         if path:
@@ -70,8 +70,6 @@ class WordEmbeddingModel(object):
         self.wordvec_matrix = params[0]
         self.weight_matrix = params[1]
         self.biases = params[2]
-        self.word_matrix_index = params[3]
-        self.word_list = params[4]
 
     def load_word_vectors(self, path):
         self.wordvec_matrix = cPickle.load(open(path, 'rb'))
