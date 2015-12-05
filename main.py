@@ -116,7 +116,7 @@ if __name__ == '__main__':
         f.write("      wordvec: " + str(args.wordvec) + "\n")
         f.close()
 
-    skip_list = cPickle.load(open(args.skiplist, 'rb')) if args.skiplist else None
+    multi_sense_skip_list = cPickle.load(open(args.skiplist, 'rb')) if args.skiplist else None
 
     model = None
     # if args.model == 'CLMP':
@@ -125,8 +125,7 @@ if __name__ == '__main__':
     #                                               learn_top_multi=args.learnMultiTop)
     if args.model == 'CL':
         model = ClusteringSgNsEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window,
-                                             batch_size=args.batch, learn_top_multi=args.learnMultiTop,
-                                             skip_list=skip_list, neg_sample_rate=args.neg)
+                                             batch_size=args.batch, min_count=args.min_count, neg_sample_rate=args.neg)
     elif args.model == 'SG':
         model = SkipGramNegSampEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window,
                                               batch_size=args.batch, min_count=args.min_count, neg_sample_rate=args.neg)
@@ -144,9 +143,9 @@ if __name__ == '__main__':
 
     print('start loading vocab...')
     if args.vocab:
-        model.load_vocab(args.vocab)
+        model.load_vocab(args.vocab, multi_sense_skip_list, args.learnMultiTop)
     else:
-        model.build_vocab(text_builder(args.data)())
+        model.build_vocab(text_builder(args.data)(), multi_sense_skip_list, args.learnMultiTop)
 
     if args.output and not args.vocab:
         print('saving vocab...')
