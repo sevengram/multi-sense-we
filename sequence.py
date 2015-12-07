@@ -27,16 +27,16 @@ def make_sampling_table(size, sampling_factor=1e-5):
     return numpy.minimum(1., f / numpy.sqrt(f))
 
 
-def skipgrams(sequence, vocabulary_size, window_size=4, negative_samples=1., shuffle=True, sampling_table=None, seed=None):
+def skipgrams(sequence, window_size=4, sampling_table=None, neg_sample_table=None, neg_sample_rate=1., shuffle=True):
     """ 
         Take a sequence (list of indexes of words), 
         returns couples of [word_index, other_word index] and labels (1s or 0s),
         where label = 1 if 'other_word' belongs to the context of 'word',
         and label=0 if 'other_word' is ramdomly sampled
 
-        @param vocabulary_size: int. maximum possible word index + 1
         @param window_size: int. actually half-window. The window of a word wi will be [i-window_size, i+window_size+1]
-        @param negative_samples: float >= 0. 0 for no negative (=random) samples. 1 for same number as positive samples.
+        @param neg_sample_table: table used to create negative samples.
+        @param neg_sample_rate: float >= 0. 0 for no negative (=random) samples. 1 for same number as positive samples.
 
         Note: by convention, index 0 in the vocabulary is a non-word and will be skipped.
     """
@@ -52,7 +52,7 @@ def skipgrams(sequence, vocabulary_size, window_size=4, negative_samples=1., shu
 
         window_start = max(0, i - window_size)
         window_end = min(len(sequence), i + window_size + 1)
-        for j in range(window_start, window_end):
+        for j in xrange(window_start, window_end):
             if j != i:
                 wj = sequence[j]
                 if not wj:
@@ -61,17 +61,18 @@ def skipgrams(sequence, vocabulary_size, window_size=4, negative_samples=1., shu
                 seq_indices.append(i)
                 labels.append(1)
 
-    if negative_samples > 0:
-        nb_negative_samples = int(len(labels) * negative_samples)
-        words = [c[0] for c in couples]
-        indices = [d for d in seq_indices]
-        couples += [[words[i % len(words)], random.randint(1, vocabulary_size - 1)] for i in range(nb_negative_samples)]
-        seq_indices += [indices[i % len(words)] for i in range(nb_negative_samples)]
-        labels += [0] * nb_negative_samples
+    if neg_sample_rate > 0 and neg_sample_table:
+        for i in xrange(int(len(labels) * neg_sample_rate)):
+            word = couples[i % len(labels)][0]
+            target = random.choice(neg_sample_table)
+            if target == word:
+                continue
+            couples.append([word, target])
+            seq_indices.append(seq_indices[i % len(labels)])
+            labels.append(0)
 
     if shuffle:
-        if seed is None:
-            seed = random.randint(0, 10e6)
+        seed = random.randint(0, 10e6)
         random.seed(seed)
         random.shuffle(couples)
         random.seed(seed)

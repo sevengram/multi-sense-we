@@ -1,5 +1,6 @@
 # -*- coding:utf-8 -*-
 
+import math
 import string
 from collections import defaultdict
 
@@ -23,48 +24,33 @@ def text_to_word_sequence(text, filters=base_filter(), lower=True, split=" "):
 
 
 class Tokenizer(object):
-    def __init__(self, words_limit=None, min_count=None, filters=base_filter(), lower=True, split=" ",
-                 use_stop_words=False):
+    def __init__(self):
         self._word_freq = defaultdict(int)
         self._word_index = {}
-        self._word_list = []
-        self.filters = filters
-        self.split = split
-        self.lower = lower
-        self.words_limit = words_limit
-        self.min_count = min_count
-        self.use_stop_words = use_stop_words
+        self.word_list = []
+        self.unigram_table = []
 
-    def fit_on_texts(self, texts):
+    def fit_on_texts(self, texts, words_limit=None, min_count=0, use_stop_words=False):
         """
             required before using texts_to_sequences or texts_to_matrix
             @param texts: can be a list or a generator (for memory-efficiency)
         """
         for text in texts:
-            seq = text_to_word_sequence(text, self.filters, self.lower, self.split)
+            seq = text_to_word_sequence(text)
             for w in seq:
                 self._word_freq[w] += 1
         wcounts = list(self._word_freq.items())
         wcounts.sort(key=lambda x: x[1], reverse=True)
-
-        wsize = len(wcounts)
-        limits = 0
-        if self.min_count:
-            for i in xrange(wsize):
-                if wcounts[wsize - i - 1][1] >= self.min_count:
-                    limits = i
-                    break
-            wcounts = wcounts[:limits]
-
-        if self.use_stop_words:
+        if min_count > 0:
+            wcounts = wcounts[:next((i for i, v in enumerate(wcounts) if v[1] < min_count), None)]
+        if words_limit:
+            wcounts = wcounts[:words_limit]
+        if use_stop_words:
             # TODO: use stop words to filter wcounts
             pass
-
-        if self.words_limit:
-            wcounts = wcounts[:self.words_limit]
-
-        self._word_list = [wc[0] for wc in wcounts]
-        self._word_index = dict(zip(self._word_list, range(len(self._word_list))))
+        self.word_list = [wc[0] for wc in wcounts]
+        self._word_index = dict(zip(self.word_list, range(len(self.word_list))))
+        self.init_unigram_table()
 
     def texts_to_sequences_generator(self, texts):
         """
@@ -75,7 +61,7 @@ class Tokenizer(object):
             Yields individual sequences.
         """
         for text in texts() if callable(texts) else texts:
-            seq = text_to_word_sequence(text, self.filters, self.lower, self.split)
+            seq = text_to_word_sequence(text)
             vect = []
             for w in seq:
                 i = self._word_index.get(w)
@@ -83,8 +69,18 @@ class Tokenizer(object):
                     vect.append(i)
             yield vect
 
-    def provide_word_list(self):
-        return self._word_list
-
     def count(self):
-        return len(self._word_list)
+        return len(self.word_list)
+
+    def init_unigram_table(self, power=0.75, table_size=10e6):
+        words_pow = [math.pow(self._word_freq[w], power) for w in self.word_list]
+        s = sum(words_pow)
+        i, d = 0, words_pow[0] / s
+        self.unigram_table = []
+        for a in xrange(int(table_size)):
+            self.unigram_table.append(i)
+            if float(a) / table_size > d:
+                i += 1
+                d += words_pow[i] / s
+            if i >= len(words_pow):
+                i = len(words_pow) - 1

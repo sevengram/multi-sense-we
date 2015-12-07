@@ -41,18 +41,18 @@ class WordEmbeddingModel(object):
         self.biases = zeros(self.words_limit, dtype=numpy.float32)
 
     def build_vocab(self, texts, *args, **kwargs):
-        self.tokenizer = text.Tokenizer(words_limit=self.words_limit, min_count=self.min_count,
-                                        use_stop_words=self.use_stop_words)
-        self.tokenizer.fit_on_texts(texts)
+        self.tokenizer = text.Tokenizer()
+        self.tokenizer.fit_on_texts(texts, words_limit=self.words_limit, min_count=self.min_count,
+                                    use_stop_words=self.use_stop_words)
         self._load_words(*args, **kwargs)
 
     def load_vocab(self, path, *args, **kwargs):
         self.tokenizer = cPickle.load(open(path, 'rb'))
         self._load_words(*args, **kwargs)
 
-    def _load_words(self,*args, **kwargs):
+    def _load_words(self, *args, **kwargs):
         self.words_limit = min(self.words_limit, self.tokenizer.count())
-        self.word_list = self.tokenizer.provide_word_list()
+        self.word_list = self.tokenizer.word_list
         for i in range(len(self.word_list)):
             self.word_matrix_index[self.word_list[i]] = [i]
         self._init_values()
@@ -116,7 +116,7 @@ class WordEmbeddingModel(object):
 
 
 class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
-    def __init__(self, words_limit=5000, dimension=128, space_factor=1, window_size=5, neg_sample_rate=1.,
+    def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1.,
                  batch_size=8, min_count=5, use_stop_words=False):
         super(SkipGramNegSampEmbeddingModel, self).__init__(words_limit=words_limit, dimension=dimension,
                                                             min_count=min_count, use_stop_words=use_stop_words)
@@ -128,9 +128,10 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
     def _sequentialize(self, texts, sampling=True, **kwargs):
         sampling_table = sequence.make_sampling_table(self.words_limit) if sampling else None
         for seq in self.tokenizer.texts_to_sequences_generator(texts):
-            yield seq, sequence.skipgrams(seq, self.words_limit, window_size=self.window_size,
-                                          negative_samples=self.neg_sample_rate,
-                                          sampling_table=sampling_table)
+            yield seq, sequence.skipgrams(seq, window_size=self.window_size,
+                                          sampling_table=sampling_table,
+                                          neg_sample_table=self.tokenizer.unigram_table,
+                                          neg_sample_rate=self.neg_sample_rate)
 
     def set_trainer(self, lr=.1, optimizer='sgd', **kwargs):
         x = T.fmatrix("x")
@@ -236,8 +237,8 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
             self.wordvec_matrix[:self.words_limit] = params[0]
         else:
             assert len(params[0]) == len(self.wordvec_matrix), "size dont match, %d vs %d" % \
-                                                                         (len(params[0]),
-                                                                          len(self.wordvec_matrix))
+                                                               (len(params[0]),
+                                                                len(self.wordvec_matrix))
             self.wordvec_matrix = params[0]
             self.cluster_center_matrix = params[3]
             self.cluster_word_count = params[4]
@@ -246,7 +247,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 
     def _load_words(self, single_sense_list=None, multi_sense_word_limit=None):
         self.words_limit = min(self.words_limit, self.tokenizer.count())
-        self.word_list = self.tokenizer.provide_word_list()
+        self.word_list = self.tokenizer.word_list
         for i in range(len(self.word_list)):
             self.word_matrix_index[self.word_list[i]] = [i]
         self.set_learn_multi_vec(single_sense_list, multi_sense_word_limit)
