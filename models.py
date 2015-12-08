@@ -269,6 +269,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         for e in range(nb_epoch):
             print "Epoch", e, "..."
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
+                sense_dict = {}
                 if callable(monitor) and k == 0:
                     c = numpy.array(couples)
                     obj = self.trainer.get_objective_value(self.wordvec_matrix[c[:, 0]],
@@ -282,7 +283,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                 last = n
                 for i in range(0, n - batch_size, batch_size):
                     # get real meaning
-                    wi = self.clustering(seq, seq_indices[i:i + batch_size])
+                    wi = self.clustering(seq, seq_indices[i:i + batch_size], sense_dict)
                     wj = [c[1] for c in couples[i:i + batch_size]]
                     wi_all += wi
 
@@ -305,14 +306,18 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 
             print "\n"
 
-    def clustering(self, seq, seq_indices):
+    def clustering(self, seq, seq_indices, sense_dict):
         wi_new = []
         for si in seq_indices:
-            wi = seq[si]
-            if self.learn_multi_vec[wi]:
-                wi_new.append(self.dpmeans(seq, si) if self.use_dpmeans else self.kmeans(seq, si))
+            if sense_dict.get(si) is not None:
+                wi_new.append(sense_dict[si])
             else:
-                wi_new.append(wi)
+                wi = seq[si]
+                if self.learn_multi_vec[wi]:
+                    wi_new.append(self.dpmeans(seq, si) if self.use_dpmeans else self.kmeans(seq, si))
+                else:
+                    wi_new.append(wi)
+                sense_dict[si] = wi_new[-1]
         return wi_new
 
     def find_nearest_sense(self, word, context):
