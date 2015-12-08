@@ -183,8 +183,8 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                                                            self.biases[c[:, 1]],
                                                            labels)
                     monitor(k, obj)
-                if take_snapshot and k % SNAPSHOT_GAP == 0 and k is not 0:
-                    self.dump(snapshot_path + '_' + str(k) + '.pkl')
+            if take_snapshot and e is not (nb_epoch-1):
+                self.dump(snapshot_path + '_' + str(e) + '.pkl')
             print "\n"
 
 
@@ -301,8 +301,8 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                                                            self.biases[wj],
                                                            labels[:last])
                     monitor(k, obj)
-                if take_snapshot and k % SNAPSHOT_GAP == 0 and k is not 0:
-                    self.dump(snapshot_path + '_' + str(k) + '.pkl')
+            if take_snapshot and e is not (nb_epoch - 1):
+                self.dump(snapshot_path + '_' + str(e) + '.pkl')
 
             print "\n"
 
