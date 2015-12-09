@@ -490,6 +490,8 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                         sense_dict[si] = sense
                 else:
                     wi_new.append(wi)
+                    wj.append(c)
+                    l_train.append(l)
                     sense_dict[si] = wi
         return wi_new, wi_new_ask, wj, wj_ask, si_ask, l_train, l_ask
 
