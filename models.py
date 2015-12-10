@@ -13,6 +13,9 @@ import text
 from trainers import SGD, AdaGrad
 from user import UserClassifier
 
+MONITOR_GAP = 20
+SNAPSHOT_GAP = 1000
+
 dist_func = {
     'COS': distance.cosine,
     'EUC': distance.euclidean
@@ -22,6 +25,11 @@ dist_func = {
 def nearest_k_points(target, points, k, dist_type):
     d = numpy.asarray(dist_func[dist_type](target, p) for p in points)
     return {i: d[i] for i in numpy.argpartition(d, k)[:k]}
+
+
+def monitor_obj(monitor, k, obj, switcher):
+    if callable(monitor) and switcher:
+        monitor(k, obj)
 
 
 class WordEmbeddingModel(object):
@@ -54,7 +62,7 @@ class WordEmbeddingModel(object):
     def _load_words(self, *args, **kwargs):
         self.words_limit = min(self.words_limit, self.tokenizer.count())
         self.word_list = self.tokenizer.word_list
-        for i in range(len(self.word_list)):
+        for i in xrange(len(self.word_list)):
             self.word_matrix_index[self.word_list[i]] = [i]
         self._init_values()
 
@@ -103,16 +111,12 @@ class WordEmbeddingModel(object):
         raise NotImplementedError()
 
     def nearest_words(self, word, limit=10, dist_type='COS'):
-        if self.wordvec_matrix is None:
-            print('load vocab and model first!')
-            return None
-        senses = self.word_matrix_index.get(word)
         result = []
+        if self.wordvec_matrix is None:
+            return result
+        senses = self.word_matrix_index.get(word, [])
         for si in senses:
-            if si is None or si >= self.wordvec_matrix.shape[0]:
-                print('can\'t find this word!')
-                return None
-            else:
+            if si is not None and si < self.wordvec_matrix.shape[0]:
                 result.append({self.word_list[i]: v for i, v in
                                nearest_k_points(self.wordvec_matrix[si], self.wordvec_matrix, limit,
                                                 dist_type).iteritems()})
@@ -121,7 +125,7 @@ class WordEmbeddingModel(object):
     def get_senses(self, wi):
         return self.word_matrix_index[self.word_list[wi]]
 
-    def get_words_text(self, word_indices):
+    def get_words(self, word_indices):
         return [self.word_list[i] for i in word_indices]
 
 
@@ -166,19 +170,35 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
             raise NotImplementedError()
         self.trainer.compile(x, w, b, y, obj)
 
-    def fit(self, texts, nb_epoch=1, sampling=True, monitor=None):
-        for e in range(nb_epoch):
+    def fit(self, texts, nb_epoch=1, sampling=True, monitor=None, snapshot_path=None):
+        for e in xrange(nb_epoch):
+            print("Epoch %s..." % e)
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
-                for i in range(0, len(couples) - self.batch_size, self.batch_size):
+                c = numpy.array(couples)
+                monitor_obj(monitor, k, self.get_obj(c[:, 0], c[:, 1], labels), switcher=(k == 0))
+                for i in xrange(0, len(couples) - self.batch_size, self.batch_size):
                     wi, wj = numpy.array(zip(*couples[i:i + self.batch_size]))
                     self.trainer.update(self.wordvec_matrix, self.weight_matrix, self.biases,
                                         labels[i:i + self.batch_size], wi, wj)
+                monitor_obj(monitor, k, self.get_obj(c[:, 0], c[:, 1], labels), switcher=(k % MONITOR_GAP == 0))
+            self.take_snapshot(snapshot_path, e)
+            print()
 
     def context_words_indices(self, seq, si, with_si=False):
         return seq[max(0, si - self.window_size): si] + [si] if with_si else [] + seq[(si + 1):si + self.window_size]
 
     def context_text(self, seq, si):
-        return ' '.join([self.word_list[i] for i in self.context_words_indices(seq, si, True)])
+        return ' '.join(self.get_words(self.context_words_indices(seq, si, True)))
+
+    def get_obj(self, wi, wj, labels):
+        return self.trainer.get_objective_value(self.wordvec_matrix[wi],
+                                                self.weight_matrix[wj],
+                                                self.biases[wj],
+                                                labels)
+
+    def take_snapshot(self, path, name):
+        if path:
+            self.dump('%s/%s.pkl' % (path, name))
 
 
 class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
@@ -240,7 +260,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
     def _load_words(self, single_sense_list=None, multi_sense_word_limit=None):
         self.words_limit = min(self.words_limit, self.tokenizer.count())
         self.word_list = self.tokenizer.word_list
-        for i in range(len(self.word_list)):
+        for i in xrange(len(self.word_list)):
             self.word_matrix_index[self.word_list[i]] = [i]
         self.set_learn_multi_vec(single_sense_list, multi_sense_word_limit)
         self._init_values()
@@ -256,15 +276,23 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                 self.learn_multi_vec[i] = True
                 count += 1
 
-    def fit(self, texts, nb_epoch=1, sampling=True, monitor=None):
-        for e in range(nb_epoch):
+    def fit(self, texts, nb_epoch=1, sampling=True, monitor=None, snapshot_path=None):
+        for e in xrange(nb_epoch):
+            print("Epoch %s..." % e)
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
+                c = numpy.array(couples)
+                monitor_obj(monitor, k, self.get_obj(c[:, 0], c[:, 1], labels), switcher=(k == 0))
                 sense_dict = {}
-                for i in range(0, len(couples) - self.batch_size, self.batch_size):
+                wi_new = []
+                for i in xrange(0, len(couples) - self.batch_size, self.batch_size):
                     wi = self.clustering(seq, seq_indices[i:i + self.batch_size], sense_dict)
+                    wi_new += wi
                     wj = [c[1] for c in couples[i:i + self.batch_size]]
                     self.trainer.update(self.wordvec_matrix, self.weight_matrix, self.biases,
                                         labels[i:i + self.batch_size], wi, wj)
+                monitor_obj(monitor, k, self.get_obj(wi_new, c[:, 1], labels), switcher=(k % MONITOR_GAP == 0))
+            self.take_snapshot(snapshot_path, e)
+            print()
 
     def clustering(self, seq, seq_indices, sense_dict):
         wi_new = []
@@ -290,8 +318,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         context_embedding = self.context_embedding(seq, si)
         word = self.word_list[seq[si]]
         sense = self.find_nearest_sense(word, context_embedding)[0]
-        self.cluster_center_matrix[sense] += context_embedding
-        self.cluster_word_count[sense] += 1
+        self.update_cluster_center(sense, context_embedding)
         return sense
 
     def dpmeans(self, seq, si):
@@ -304,8 +331,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                 sense = len(self.word_list)
                 self.word_list.append(word)
                 self.word_matrix_index[word].append(sense)
-        self.cluster_center_matrix[sense] += context_embedding
-        self.cluster_word_count[sense] += 1
+        self.update_cluster_center(sense, context_embedding)
         return sense
 
     def context_embedding(self, seq, si):
@@ -316,6 +342,10 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 
     def sense_count(self, word):
         return len(self.word_matrix_index[word])
+
+    def update_cluster_center(self, sense, embedding):
+        self.cluster_center_matrix[sense] += embedding
+        self.cluster_word_count[sense] += 1
 
 
 class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
@@ -329,71 +359,72 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
         self.context_words_limit = context_words_limit
         self.context_words_map = collections.defaultdict(set)
 
-    def fit(self, texts, nb_epoch=1, sampling=True, monitor=None):
-        batch_size = self.batch_size
+    def fit(self, texts, nb_epoch=1, sampling=True, monitor=None, snapshot_path=None):
         user = UserClassifier()
-        for e in range(nb_epoch):
+        for e in xrange(nb_epoch):
+            print("Epoch %s..." % e)
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 sense_dict = {}
-                for i in range(0, len(couples) - batch_size, batch_size):
-                    wi, wj, labels, questions = self.clustering_ask(seq, seq_indices[i:i + batch_size], sense_dict,
-                                                                    [c[1] for c in couples[i:i + batch_size]],
-                                                                    labels[i:i + batch_size])
-                    self.trainer.update(self.wordvec_matrix,
-                                        self.weight_matrix,
-                                        self.biases,
-                                        labels,
-                                        wi, wj)
-                    # questions = {
-                    #     34:{
-                    #         'stem': '',
-                    #         'options': {
-                    #             12:['','']
-                    #         },
-                    #         'wj': 21,
-                    #         'label':1
-                    #     }
-                    # }
+                c = numpy.array(couples)
+                monitor_obj(monitor, k, self.get_obj(c[:, 0], c[:, 1], labels), switcher=(k == 0))
+                wi_new, wj_new, lables_new = [], [], []
+                for i in xrange(0, len(couples) - self.batch_size, self.batch_size):
+                    wi, wj, labels, questions = self.clustering_ask(seq, seq_indices[i:i + self.batch_size], sense_dict,
+                                                                    [c[1] for c in couples[i:i + self.batch_size]],
+                                                                    labels[i:i + self.batch_size])
+                    wi_new += wi
+                    wj_new += wj
+                    lables_new += labels
+                    self.trainer.update(self.wordvec_matrix, self.weight_matrix, self.biases,
+                                        labels, wi, wj)
                     answers = user.ask(questions)
-                    wi_usr, wj_usr, label_usr = [], [], []
-                    for u, v in answers.iteritems():
-                        wi_usr.append(v)
-                        wj_usr.append(questions[u]['wj'])
-                        label_usr.append(questions[u]['label'])
-                    self.trainer.update(self.wordvec_matrix,
-                                        self.weight_matrix,
-                                        self.biases,
-                                        label_usr,
-                                        wi_usr, wj_usr)
+                    wi_usr, wj_usr, labels_usr = [], [], []
+                    for si, sense in answers.iteritems():
+                        wi_usr.append(sense)
+                        wj_usr.append(questions[si]['wj'])
+                        labels_usr.append(questions[si]['label'])
+                        self.update_cluster_center(sense, questions[si]['embedding'])
+                        self.add_sense_context_words(sense, self.context_words_indices(seq, si))
+                    wi_new += wi_usr
+                    wj_new += wj_usr
+                    lables_new += labels_usr
+                    self.trainer.update(self.wordvec_matrix, self.weight_matrix, self.biases,
+                                        labels_usr, wi_usr, wj_usr)
+                monitor_obj(monitor, k, self.get_obj(wi_new, wj_new, lables_new), switcher=(k % MONITOR_GAP == 0))
+            self.take_snapshot(snapshot_path, e)
+            print()
 
-    def clustering_ask(self, seq, seq_indices, sense_dict, wj_org, label_org):
-        wi = []
-        wj = []
-        labels = []
-        questions = []
-        for si, c, l in zip(seq_indices, wj_org, label_org):
-            if sense_dict.get(si) is not None:
-                wi.append(sense_dict[si])
-                wj.append(c)
-                labels.append(l)
+    def clustering_ask(self, seq, seq_indices, sense_dict, wj, labels):
+        wi_new, wj_new, labels_new = [], [], []
+        questions = {}
+        for si, j, l in zip(seq_indices, wj, labels):
+            if si in sense_dict:
+                wi_new.append(sense_dict[si])
+                wj_new.append(j)
+                labels_new.append(l)
             else:
                 wi = seq[si]
                 if self.learn_multi_vec[wi]:
-                    sense, asking = self.dpmeans(seq, si) if self.use_dpmeans else self.kmeans(seq, si)
+                    sense, asking, embedding = self.dpmeans(seq, si) if self.use_dpmeans else self.kmeans(seq, si)
                     if asking:
-                        # TODO: create questions
-                        pass
+                        questions[si] = {
+                            'stem': self.context_text(seq, si),
+                            'options': self.get_sense_context_words(wi),
+                            'wj': j,
+                            'labels': l,
+                            'embedding': embedding
+                        }
                     else:
-                        wi.append(sense)
-                        wj.append(c)
-                        labels.append(l)
+                        wi_new.append(sense)
+                        wj_new.append(j)
+                        labels_new.append(l)
                         sense_dict[si] = sense
                 else:
-                    wi.append(wi)
-                    wj.append(c)
-                    labels.append(l)
+                    wi_new.append(wi)
+                    wj_new.append(j)
+                    labels_new.append(l)
                     sense_dict[si] = wi
-        return wi, wj, labels, questions
+        return wi_new, wj_new, labels_new, questions
 
     def kmeans(self, seq, si):
         # TODO: kmeans initialize
@@ -402,10 +433,9 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
         sense, min_dist, dist_var = self.find_nearest_sense(word, context_embedding)
         asking = dist_var < self.ask_threshold
         if not asking:
-            self.cluster_center_matrix[sense] += context_embedding
-            self.cluster_word_count[sense] += 1
+            self.update_cluster_center(sense, context_embedding)
             self.add_sense_context_words(sense, self.context_words_indices(seq, si))
-        return sense, asking
+        return sense, asking, context_embedding
 
     def dpmeans(self, seq, si):
         context_embedding = self.context_embedding(seq, si)
@@ -421,18 +451,17 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
             elif dist_var < self.ask_threshold:
                 asking = True
         if not asking:
-            self.cluster_center_matrix[sense] += context_embedding
-            self.cluster_word_count[sense] += 1
+            self.update_cluster_center(sense, context_embedding)
             self.add_sense_context_words(sense, self.context_words_indices(seq, si))
-        return sense, asking
+        return sense, asking, context_embedding
 
     def get_sense_context_words(self, wi):
-        return {sense: self.context_words_map[sense] for sense in self.get_senses(wi)}
+        return {sense: self.get_words(self.context_words_map[sense]) for sense in self.get_senses(wi)}
 
     def add_sense_context_words(self, sense, word_indices):
         self.context_words_map[sense] |= set(word_indices)
         if len(self.context_words_map[sense]) > self.context_words_limit:
-            l = numpy.asarray(list(self.context_words_map[sense]))
+            l = numpy.asarray(self.context_words_map[sense])
             ids = nearest_k_points(self.cluster_center(sense), [self.weight_matrix[c] for c in l],
                                    self.context_words_limit, self.distance_type).keys()
             self.context_words_map[sense].intersection_update(l[ids])
