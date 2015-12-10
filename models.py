@@ -11,9 +11,7 @@ from scipy.spatial import distance
 import sequence
 import text
 from trainers import SGD, AdaGrad
-
-MONITOR_GAP = 20
-SNAPSHOT_GAP = 2000
+from user import UserClassifier
 
 dist_func = {
     'COS': distance.cosine,
@@ -104,20 +102,27 @@ class WordEmbeddingModel(object):
     def _sequentialize(self, texts, **kwargs):
         raise NotImplementedError()
 
-    def nearest_words(self, word, limit=20, dist_type='COS'):
+    def nearest_words(self, word, limit=10, dist_type='COS'):
         if self.wordvec_matrix is None:
             print('load vocab and model first!')
             return None
-        wi = self.word_matrix_index.get(word)[0]
-        if wi is None or wi >= self.wordvec_matrix.shape[0]:
-            print('can\'t find this word!')
-            return None
-        else:
-            return {self.word_list[i]: v for i, v in
-                    nearest_k_points(self.wordvec_matrix[wi], self.wordvec_matrix, limit, dist_type)}
+        senses = self.word_matrix_index.get(word)
+        result = []
+        for si in senses:
+            if si is None or si >= self.wordvec_matrix.shape[0]:
+                print('can\'t find this word!')
+                return None
+            else:
+                result.append({self.word_list[i]: v for i, v in
+                               nearest_k_points(self.wordvec_matrix[si], self.wordvec_matrix, limit,
+                                                dist_type).iteritems()})
+        return result
 
     def get_senses(self, wi):
         return self.word_matrix_index[self.word_list[wi]]
+
+    def get_words_text(self, word_indices):
+        return [self.word_list[i] for i in word_indices]
 
 
 class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
@@ -326,84 +331,69 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
 
     def fit(self, texts, nb_epoch=1, sampling=True, monitor=None):
         batch_size = self.batch_size
+        user = UserClassifier()
         for e in range(nb_epoch):
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 sense_dict = {}
                 for i in range(0, len(couples) - batch_size, batch_size):
-                    wj_org = [c[1] for c in couples[i:i + batch_size]]
-                    wi, wi_ask, wj, wj_ask, si_ask, l_train, l_ask = \
-                        self.clustering_ask(seq, seq_indices[i:i + batch_size], wj_org,
-                                            labels[i:i + batch_size], sense_dict)
+                    wi, wj, labels, questions = self.clustering_ask(seq, seq_indices[i:i + batch_size], sense_dict,
+                                                                    [c[1] for c in couples[i:i + batch_size]],
+                                                                    labels[i:i + batch_size])
                     self.trainer.update(self.wordvec_matrix,
                                         self.weight_matrix,
                                         self.biases,
-                                        l_train,
+                                        labels,
                                         wi, wj)
-
-                    wj_ans = []
-                    wi_ans = []
-                    l_ans = []
-                    # 同时你把问题发给server，让用户来判断wi_ask这些单词真实的意思标号。
-                    #
-                    #                         wj_ask: 词对中的context，需要这个的原因从想要你返回给我的可以明白【暂时先无视这个
-                    #                          l_ask: 需要的原因和wj_ask一样
-                    #                         wi_ask: 单词的原index，就是tokenizer给出的那个
-                    #                         si_ask: 这个单词在当前读入的sequence中的位置
-                    #                            seq: 当前的sequence，用来找到某个单词对应的context
-                    #         self.word_matrix_index: 从word找到他现在有的sense list
-                    #              self.context_list: 字典类型，key：sense index，value：context list（最多存self.max_context=200 个）；
-                    #                                 需要从这里找到距离cluster center最近的self.show_context=15个context index
-                    #                     sense_dict: 当参数传进去，更新一下
-
-                    # TODO: get answer from user
-
-                    # 想要你返回给我的:
-                    #                         wi_ans: wi_ask中用户选择好的sense
-                    #                         si_ans: wi_ans对应的si，这是为了我更新一下self.cluster_centers 和self.cluster_word_count
-                    #                  wi_need_merge: wi_ask中用户觉得我们的sense太扯淡需要把他们都merge重新来的
-                    #                         wj_ans: wi_ask中用户选择好sense不需要merge的那些单词对应的要训练的context 【所以上一步你需要wj_ask
-                    #                          l_ans: 不用merge的词对的label
-                    #                     sense_dict: 更新一下sense_dict, key是si, value是用户选择的sense，这样neg sample再遇到就不用再问用户一次了，我后面有判断，只要这里存过的就不问用户
-
+                    # questions = {
+                    #     34:{
+                    #         'stem': '',
+                    #         'options': {
+                    #             12:['','']
+                    #         },
+                    #         'wj': 21,
+                    #         'label':1
+                    #     }
+                    # }
+                    answers = user.ask(questions)
+                    wi_usr, wj_usr, label_usr = [], [], []
+                    for u, v in answers.iteritems():
+                        wi_usr.append(v)
+                        wj_usr.append(questions[u]['wj'])
+                        label_usr.append(questions[u]['label'])
                     self.trainer.update(self.wordvec_matrix,
                                         self.weight_matrix,
                                         self.biases,
-                                        l_ans,
-                                        wi_ans, wj_ans)
+                                        label_usr,
+                                        wi_usr, wj_usr)
 
-    def clustering_ask(self, seq, seq_indices, wj_org, label_org, sense_dict):
-        wi_new = []
-        wi_new_ask = []
+    def clustering_ask(self, seq, seq_indices, sense_dict, wj_org, label_org):
+        wi = []
         wj = []
-        wj_ask = []
-        si_ask = []
-        l_train = []
-        l_ask = []
+        labels = []
+        questions = []
         for si, c, l in zip(seq_indices, wj_org, label_org):
             if sense_dict.get(si) is not None:
-                wi_new.append(sense_dict[si])
+                wi.append(sense_dict[si])
                 wj.append(c)
-                l_train.append(l)
+                labels.append(l)
             else:
                 wi = seq[si]
                 if self.learn_multi_vec[wi]:
                     sense, asking = self.dpmeans(seq, si) if self.use_dpmeans else self.kmeans(seq, si)
                     if asking:
-                        wi_new_ask.append(wi)
-                        wj_ask.append(c)
-                        si_ask.append(si)
-                        l_ask.append(l)
+                        # TODO: create questions
+                        pass
                     else:
-                        wi_new.append(sense)
+                        wi.append(sense)
                         wj.append(c)
-                        l_train.append(l)
+                        labels.append(l)
                         sense_dict[si] = sense
                 else:
-                    wi_new.append(wi)
+                    wi.append(wi)
                     wj.append(c)
-                    l_train.append(l)
+                    labels.append(l)
                     sense_dict[si] = wi
-        return wi_new, wi_new_ask, wj, wj_ask, si_ask, l_train, l_ask
+        return wi, wj, labels, questions
 
     def kmeans(self, seq, si):
         # TODO: kmeans initialize
@@ -437,7 +427,7 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
         return sense, asking
 
     def get_sense_context_words(self, wi):
-        return {sense: self.context_words_map[sense].data() for sense in self.get_senses(wi)}
+        return {sense: self.context_words_map[sense] for sense in self.get_senses(wi)}
 
     def add_sense_context_words(self, sense, word_indices):
         self.context_words_map[sense] |= set(word_indices)
