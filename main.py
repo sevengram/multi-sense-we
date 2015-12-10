@@ -21,8 +21,8 @@ def build_monitor(total_lines, monitor_values=None):
             total_time = (time.time() - start_time) / percent
             remain_time = start_time + total_time - time.time()
             sys.stdout.write(
-                '%.2f%%, estimated remaining time: %d min, objective value: %f\r' % (
-                    percent * 100, int(remain_time / 60), objval))
+                '%.2f%%, estimated remaining time: %s sec, objective value: %f\r' % (
+                    percent * 100, remain_time, objval))
             sys.stdout.flush()
     return m
 
@@ -119,10 +119,6 @@ if __name__ == '__main__':
     multi_sense_skip_list = cPickle.load(open(args.skiplist, 'rb')) if args.skiplist else None
 
     model = None
-    # if args.model == 'CLMP':
-    #     model = ClusteringSgMultiEmbeddingModelMP(words_limit=args.limit, dimension=args.dimension,
-    #                                               window_size=args.window, batch_size=args.batch,
-    #                                               learn_top_multi=args.learnMultiTop)
     if args.model == 'CL':
         model = ClusteringSgNsEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window,
                                              batch_size=args.batch, min_count=args.min_count, neg_sample_rate=args.neg)
@@ -172,8 +168,8 @@ if __name__ == '__main__':
         model.set_trainer(lr=args.lr, lr_b=args.lr_b, momentum=args.momentum, momentum_b=args.momentum_b,
                           optimizer=args.optimizer)
         model.fit(text_builder(args.data), nb_epoch=args.epoch,
-                  monitor=build_monitor(file_lines(args.data), obj_trajectory), take_snapshot=args.snapshot,
-                  snapshot_path=snapshot_path_base)
+                  monitor=build_monitor(file_lines(args.data), obj_trajectory),
+                  snapshot_path=snapshot_path_base if args.snapshot else None)
         print('\nfinish!')
 
     if args.save_params:

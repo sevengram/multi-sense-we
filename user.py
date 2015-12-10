@@ -48,14 +48,14 @@ class UserClassifier(object):
         threads = []
         with self.msg_queue.mutex:
             self.msg_queue.queue.clear()
-        for i, q in enumerate(questions):
-            t = QuestionThread(q, self.tid, self.qmap, i)
+        for i, q in questions.iteritems():
+            t = QuestionThread(q, i, self.tid, self.qmap)
             threads.append(t)
         for t in threads:
             t.start()
         for t in threads:
             t.join()
-        result = [None] * len(self.qmap)
+        result = {}
         while self.qmap:
             answer = self.msg_queue.get()
             qid = answer['qid']
