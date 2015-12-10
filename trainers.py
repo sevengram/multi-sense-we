@@ -20,7 +20,7 @@ class Trainer(object):
     def update(self, embeds, weights, bias, labels, wi, wj):
         raise NotImplementedError
 
-    def get_objective_value(self, embeds, weights, bias, labels):
+    def objective_value(self, embeds, weights, bias, labels):
         return self.objective(embeds, weights, bias, labels)
 
 

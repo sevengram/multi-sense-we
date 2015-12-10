@@ -7,7 +7,7 @@ import cPickle
 import datetime
 import argparse
 
-from models import ClusteringSgNsEmbeddingModel, SkipGramNegSampEmbeddingModel
+from models import ClusteringSgNsEmbeddingModel, SkipGramNegSampEmbeddingModel, InteractiveClSgNsEmbeddingModel
 
 
 def build_monitor(total_lines, monitor_values=None):
@@ -21,9 +21,10 @@ def build_monitor(total_lines, monitor_values=None):
             total_time = (time.time() - start_time) / percent
             remain_time = start_time + total_time - time.time()
             sys.stdout.write(
-                '%.2f%%, estimated remaining time: %s sec, objective value: %f\r' % (
+                '%.2f%%, estimated remaining time: %d sec, objective value: %f\r' % (
                     percent * 100, remain_time, objval))
             sys.stdout.flush()
+
     return m
 
 
@@ -32,6 +33,7 @@ def text_builder(path):
         with open(path) as f:
             for l in f:
                 yield l
+
     return g
 
 
@@ -94,7 +96,7 @@ if __name__ == '__main__':
         else:
             sub_dir += '_' + datetime.datetime.now().strftime('%S')
             os.makedirs(sub_dir)
-        f = open(sub_dir+"/arguments.txt", 'w')
+        f = open(sub_dir + "/arguments.txt", 'w')
         f.write("         data: " + str(args.data) + "\n")
         f.write("        vocab: " + str(args.vocab) + "\n")
         f.write("        limit: " + str(args.limit) + "\n")
@@ -125,6 +127,10 @@ if __name__ == '__main__':
     elif args.model == 'SG':
         model = SkipGramNegSampEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window,
                                               batch_size=args.batch, min_count=args.min_count, neg_sample_rate=args.neg)
+    elif args.model == 'IC':
+        model = InteractiveClSgNsEmbeddingModel(words_limit=args.limit, dimension=args.dimension,
+                                                window_size=args.window, batch_size=args.batch,
+                                                min_count=args.min_count, neg_sample_rate=args.neg)
     else:
         NotImplementedError()
 
