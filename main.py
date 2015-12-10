@@ -202,4 +202,12 @@ if __name__ == '__main__':
             continue
         if word == '\q':
             break
-        print(model.nearest_words(word.lower()))
+        if args.model == 'SG':
+            print(model.nearest_words(word.lower()))
+        elif args.model == 'CL':
+            word_list = model.nearest_words(word.lower())
+            for i, nearest_sense in enumerate(word_list):
+                print "sense", i, ":"
+                print(nearest_sense)
+        else:
+            NotImplementedError()
