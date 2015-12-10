@@ -361,6 +361,22 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
     def sense_count(self, word):
         return len(self.word_matrix_index[word])
 
+    def nearest_words(self, word, limit=10, distance_type='COS'):
+        if self.wordvec_matrix is None:
+            print('load vocab and model first!')
+            return None
+        sense_indices = self.word_matrix_index.get(word)
+        nearest_word_list = []
+        for sense in sense_indices:
+            if sense is None or sense >= self.wordvec_matrix.shape[0]:
+                print('can\'t find this word!')
+                return None
+            else:
+                d = [dist_func[distance_type](self.wordvec_matrix[sense], v) for v in self.wordvec_matrix]
+                nearest_indices = numpy.argpartition(d, limit)[:limit]
+                nearest_word_list.append({self.word_list[i]: d[i] for i in nearest_indices})
+        return nearest_word_list
+
 
 class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
     def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1., batch_size=8,
