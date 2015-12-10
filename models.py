@@ -1,6 +1,7 @@
 # -*- coding:utf-8 -*-
 
 import cPickle
+import collections
 
 import numpy
 from numpy import random, zeros, var
@@ -20,8 +21,13 @@ dist_func = {
 }
 
 
+def nearest_k_points(target, points, k, dist_type):
+    d = numpy.asarray(dist_func[dist_type](target, p) for p in points)
+    return {i: d[i] for i in numpy.argpartition(d, k)[:k]}
+
+
 class WordEmbeddingModel(object):
-    def __init__(self, words_limit=5000, dimension=128, min_count=5, use_stop_words=False):
+    def __init__(self, words_limit=5000, dimension=128, min_count=5):
         self.words_limit = words_limit
         self.dimension = dimension
         self.tokenizer = None
@@ -31,7 +37,6 @@ class WordEmbeddingModel(object):
         self.weight_matrix = None
         self.biases = None
         self.min_count = min_count
-        self.use_stop_words = use_stop_words
 
     def _init_values(self):
         self.wordvec_matrix = (random.randn(self.words_limit, self.dimension).astype(
@@ -41,8 +46,7 @@ class WordEmbeddingModel(object):
 
     def build_vocab(self, texts, *args, **kwargs):
         self.tokenizer = text.Tokenizer()
-        self.tokenizer.fit_on_texts(texts, words_limit=self.words_limit, min_count=self.min_count,
-                                    use_stop_words=self.use_stop_words)
+        self.tokenizer.fit_on_texts(texts, words_limit=self.words_limit, min_count=self.min_count)
         self._load_words(*args, **kwargs)
 
     def load_vocab(self, path, *args, **kwargs):
@@ -72,7 +76,7 @@ class WordEmbeddingModel(object):
         self.biases = params[2]
 
     def load_word_vectors(self, path):
-        self.wordvec_matrix = cPickle.load(open(path, 'rb'))
+        self.wordvec_matrix = cPickle.load(open(path, "rb"))
 
     def save_tokenizer(self, path):
         if path:
@@ -100,25 +104,26 @@ class WordEmbeddingModel(object):
     def _sequentialize(self, texts, **kwargs):
         raise NotImplementedError()
 
-    def nearest_words(self, word, limit=20, distance_type='COS'):
+    def nearest_words(self, word, limit=20, dist_type='COS'):
         if self.wordvec_matrix is None:
             print('load vocab and model first!')
             return None
-        word_index = self.word_matrix_index.get(word)[0]
-        if word_index is None or word_index >= self.wordvec_matrix.shape[0]:
+        wi = self.word_matrix_index.get(word)[0]
+        if wi is None or wi >= self.wordvec_matrix.shape[0]:
             print('can\'t find this word!')
             return None
         else:
-            d = [dist_func[distance_type](self.wordvec_matrix[word_index], v) for v in self.wordvec_matrix]
-            nearest_indices = numpy.argpartition(d, limit)[:limit]
-            return {self.word_list[i]: d[i] for i in nearest_indices}
+            return {self.word_list[i]: v for i, v in
+                    nearest_k_points(self.wordvec_matrix[wi], self.wordvec_matrix, limit, dist_type)}
+
+    def get_senses(self, wi):
+        return self.word_matrix_index[self.word_list[wi]]
 
 
 class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
-    def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1.,
-                 batch_size=8, min_count=5, use_stop_words=False):
+    def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1., batch_size=8, min_count=5):
         super(SkipGramNegSampEmbeddingModel, self).__init__(words_limit=words_limit, dimension=dimension,
-                                                            min_count=min_count, use_stop_words=use_stop_words)
+                                                            min_count=min_count)
         self.window_size = window_size
         self.batch_size = batch_size
         self.neg_sample_rate = neg_sample_rate
@@ -164,18 +169,23 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                     self.trainer.update(self.wordvec_matrix, self.weight_matrix, self.biases,
                                         labels[i:i + self.batch_size], wi, wj)
 
+    def context_words_indices(self, seq, si, with_si=False):
+        return seq[max(0, si - self.window_size): si] + [si] if with_si else [] + seq[(si + 1):si + self.window_size]
+
+    def context_text(self, seq, si):
+        return ' '.join([self.word_list[i] for i in self.context_words_indices(seq, si, True)])
+
 
 class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
-    def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1., batch_size=8,
-                 max_senses=5, threshold=.5, min_count=5, use_stop_words=False, distance_type='COS',
-                 use_dpmeans=True, multi_sense_word_limit=None, single_sense_list=None):
+    def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1., batch_size=8, sense_limit=5,
+                 threshold=.5, min_count=5, distance_type='COS', use_dpmeans=True, multi_sense_word_limit=None,
+                 single_sense_list=None):
         super(ClusteringSgNsEmbeddingModel, self).__init__(words_limit=words_limit, dimension=dimension,
                                                            window_size=window_size, neg_sample_rate=neg_sample_rate,
-                                                           batch_size=batch_size, min_count=min_count,
-                                                           use_stop_words=use_stop_words)
+                                                           batch_size=batch_size, min_count=min_count)
         self.cluster_center_matrix = None
         self.cluster_word_count = None
-        self.max_senses = max_senses
+        self.sense_limit = sense_limit
         self.threshold = threshold
         self.learn_multi_vec = []
         self.distance_type = distance_type
@@ -185,7 +195,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 
     def _init_values(self):
         num_multi_sense_words = sum(self.learn_multi_vec)
-        total_length = self.words_limit + (self.max_senses - 1) * num_multi_sense_words
+        total_length = self.words_limit + (self.sense_limit - 1) * num_multi_sense_words
         self.wordvec_matrix = (random.randn(total_length, self.dimension).astype(
             numpy.float32) - 0.5) / self.dimension
         self.weight_matrix = zeros((self.words_limit, self.dimension), dtype=numpy.float32)
@@ -285,16 +295,13 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         sense = seq[si]
         if self.cluster_word_count[sense] > 0:
             sense, min_dis = self.find_nearest_sense(word, context_embedding)[:2]
-            if self.sense_count(word) < self.max_senses and min_dis > self.threshold:
+            if self.sense_count(word) < self.sense_limit and min_dis > self.threshold:
                 sense = len(self.word_list)
                 self.word_list.append(word)
                 self.word_matrix_index[word].append(sense)
         self.cluster_center_matrix[sense] += context_embedding
         self.cluster_word_count[sense] += 1
         return sense
-
-    def context_words_indices(self, seq, si):
-        return seq[max(0, si - self.window_size): si] + seq[(si + 1):si + self.window_size]
 
     def context_embedding(self, seq, si):
         return numpy.mean(self.weight_matrix[self.context_words_indices(seq, si)], axis=0)
@@ -307,17 +314,15 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 
 
 class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
-    def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1., batch_size=8,
-                 max_senses=5, threshold=.5, min_count=5, use_stop_words=False, distance_type='COS',
-                 use_dpmeans=True, ask_threshold=.4, show_context=15, max_context=200):
+    def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1., batch_size=8, sense_limit=5,
+                 threshold=.5, min_count=5, distance_type='COS', use_dpmeans=True, ask_threshold=.4,
+                 context_words_limit=15):
         super(InteractiveClSgNsEmbeddingModel, self).__init__(words_limit, dimension, window_size, neg_sample_rate,
-                                                              batch_size, max_senses, threshold, min_count,
-                                                              use_stop_words, distance_type, use_dpmeans)
+                                                              batch_size, sense_limit, threshold, min_count,
+                                                              distance_type, use_dpmeans)
         self.ask_threshold = ask_threshold
-        self.show_context = show_context
-        self.max_context = max_context
-        self.context_list = {}
-        self.significant_context_list = {}
+        self.context_words_limit = context_words_limit
+        self.context_words_map = collections.defaultdict(set)
 
     def fit(self, texts, nb_epoch=1, sampling=True, monitor=None):
         batch_size = self.batch_size
@@ -329,8 +334,6 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                     wi, wi_ask, wj, wj_ask, si_ask, l_train, l_ask = \
                         self.clustering_ask(seq, seq_indices[i:i + batch_size], wj_org,
                                             labels[i:i + batch_size], sense_dict)
-
-                    # 可以先训练这些
                     self.trainer.update(self.wordvec_matrix,
                                         self.weight_matrix,
                                         self.biases,
@@ -347,13 +350,9 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                     #                         wi_ask: 单词的原index，就是tokenizer给出的那个
                     #                         si_ask: 这个单词在当前读入的sequence中的位置
                     #                            seq: 当前的sequence，用来找到某个单词对应的context
-                    #                 self.word_list: 从word index或者context index 找到真正的单词
                     #         self.word_matrix_index: 从word找到他现在有的sense list
                     #              self.context_list: 字典类型，key：sense index，value：context list（最多存self.max_context=200 个）；
                     #                                 需要从这里找到距离cluster center最近的self.show_context=15个context index
-                    #  self.significant_context_list: 字典类型，key: sense index, value: significant context index (长度为self.show_context=15)
-                    #                                 如果某个sense对应的value不是None的话，说明这个意思的significant context list已经固定了，
-                    #                                 你就不需要使用 self.context_list了
                     #                     sense_dict: 当参数传进去，更新一下
 
                     # TODO: get answer from user
@@ -388,10 +387,7 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
             else:
                 wi = seq[si]
                 if self.learn_multi_vec[wi]:
-                    if self.use_dpmeans:
-                        sense, asking = self.dpmeans(seq, si)
-                    else:
-                        sense, asking = self.kmeans(seq, si)
+                    sense, asking = self.dpmeans(seq, si) if self.use_dpmeans else self.kmeans(seq, si)
                     if asking:
                         wi_new_ask.append(wi)
                         wj_ask.append(c)
@@ -412,33 +408,23 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
     def kmeans(self, seq, si):
         # TODO: kmeans initialize
         context_embedding = self.context_embedding(seq, si)
-        context_indices = self.context_words_indices(seq, si)
         word = self.word_list[seq[si]]
-        asking = False
         sense, min_dist, dist_var = self.find_nearest_sense(word, context_embedding)
-        if dist_var < self.ask_threshold:
-            asking = True
+        asking = dist_var < self.ask_threshold
         if not asking:
             self.cluster_center_matrix[sense] += context_embedding
             self.cluster_word_count[sense] += 1
-            if sense not in self.context_list:
-                self.context_list[sense] = context_indices
-            else:
-                if len(self.context_list[sense]) < self.max_context:
-                    self.context_list[sense] += context_indices
-                elif sense not in self.significant_context_list:
-                    self.significant_context_list[sense] = self.find_significant_context(sense)
+            self.add_sense_context_words(sense, self.context_words_indices(seq, si))
         return sense, asking
 
     def dpmeans(self, seq, si):
         context_embedding = self.context_embedding(seq, si)
-        context_indices = self.context_words_indices(seq, si)
         word = self.word_list[seq[si]]
         sense = seq[si]
         asking = False
         if self.cluster_word_count[sense] > 0:
             sense, min_dis, dist_var = self.find_nearest_sense(word, context_embedding)
-            if self.sense_count(word) < self.max_senses and min_dis > self.threshold:
+            if self.sense_count(word) < self.sense_limit and min_dis > self.threshold:
                 sense = len(self.word_list)
                 self.word_list.append(word)
                 self.word_matrix_index[word].append(sense)
@@ -447,17 +433,16 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
         if not asking:
             self.cluster_center_matrix[sense] += context_embedding
             self.cluster_word_count[sense] += 1
-            if sense not in self.context_list:
-                self.context_list[sense] = context_indices
-            else:
-                if len(self.context_list[sense]) < self.max_context:
-                    self.context_list[sense] += context_indices
-                elif sense not in self.significant_context_list:
-                    self.significant_context_list[sense] = self.find_significant_context(sense)
+            self.add_sense_context_words(sense, self.context_words_indices(seq, si))
         return sense, asking
 
-    def find_significant_context(self, sense):
-        d = [dist_func[self.distance_type](self.cluster_center(sense), self.weight_matrix[c]) for c in
-             self.context_list[sense]]
-        nearest_indices = numpy.argpartition(d, self.show_context)[:self.show_context]
-        return [self.context_list[sense][i] for i in nearest_indices]
+    def get_sense_context_words(self, wi):
+        return {sense: self.context_words_map[sense].data() for sense in self.get_senses(wi)}
+
+    def add_sense_context_words(self, sense, word_indices):
+        self.context_words_map[sense] |= set(word_indices)
+        if len(self.context_words_map[sense]) > self.context_words_limit:
+            l = numpy.asarray(list(self.context_words_map[sense]))
+            ids = nearest_k_points(self.cluster_center(sense), [self.weight_matrix[c] for c in l],
+                                   self.context_words_limit, self.distance_type).keys()
+            self.context_words_map[sense].intersection_update(l[ids])
