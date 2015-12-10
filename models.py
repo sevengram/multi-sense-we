@@ -13,7 +13,7 @@ import text
 from trainers import SGD, AdaGrad
 
 MONITOR_GAP = 20
-SNAPSHOT_GAP = 2000
+SNAPSHOT_GAP = 1000
 
 dist_func = {
     'COS': distance.cosine,
@@ -183,8 +183,11 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                                                            self.biases[c[:, 1]],
                                                            labels)
                     monitor(k, obj)
-            if take_snapshot and e is not (nb_epoch-1):
+                if take_snapshot and k % SNAPSHOT_GAP == 0 and k is not 0 and k < 4000:
+                    self.dump(snapshot_path + '_' + str(k) + '.pkl')
+            if take_snapshot and e is not (nb_epoch - 1):
                 self.dump(snapshot_path + '_' + str(e) + '.pkl')
+
             print "\n"
 
 
