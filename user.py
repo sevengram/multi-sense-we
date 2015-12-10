@@ -20,11 +20,13 @@ class QuestionThread(threading.Thread):
         self.index = index
 
     def run(self):
-        resp = http.post_dict(question_url, {
+        data = {
             'tid': self.tid,
             'stem': self.question['stem'],
             'options': json.dumps(self.question['options'])
-        })
+        }
+        print('post question:%s' % data)
+        resp = http.post_dict(question_url, data)
         resp_data = json.loads(resp.body)
         self.qmap[resp_data['data']['qid']] = self.index
 

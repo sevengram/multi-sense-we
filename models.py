@@ -23,7 +23,7 @@ dist_func = {
 
 
 def nearest_k_points(target, points, k, dist_type):
-    d = numpy.asarray(dist_func[dist_type](target, p) for p in points)
+    d = [dist_func[dist_type](target, p) for p in points]
     return {i: d[i] for i in numpy.argpartition(d, k)[:k]}
 
 
@@ -191,10 +191,7 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
         return ' '.join(self.get_words(self.context_words_indices(seq, si, True)))
 
     def get_obj(self, wi, wj, labels):
-        return self.trainer.get_objective_value(self.wordvec_matrix[wi],
-                                                self.weight_matrix[wj],
-                                                self.biases[wj],
-                                                labels)
+        return self.trainer.objective_value(self.wordvec_matrix[wi], self.weight_matrix[wj], self.biases[wj], labels)
 
     def take_snapshot(self, path, name):
         if path:
@@ -377,19 +374,20 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                     lables_new += labels
                     self.trainer.update(self.wordvec_matrix, self.weight_matrix, self.biases,
                                         labels, wi, wj)
-                    answers = user.ask(questions)
-                    wi_usr, wj_usr, labels_usr = [], [], []
-                    for si, sense in answers.iteritems():
-                        wi_usr.append(sense)
-                        wj_usr.append(questions[si]['wj'])
-                        labels_usr.append(questions[si]['label'])
-                        self.update_cluster_center(sense, questions[si]['embedding'])
-                        self.add_sense_context_words(sense, self.context_words_indices(seq, si))
-                    wi_new += wi_usr
-                    wj_new += wj_usr
-                    lables_new += labels_usr
-                    self.trainer.update(self.wordvec_matrix, self.weight_matrix, self.biases,
-                                        labels_usr, wi_usr, wj_usr)
+                    if questions:
+                        answers = user.ask(questions)
+                        wi_usr, wj_usr, labels_usr = [], [], []
+                        for si, sense in answers.iteritems():
+                            wi_usr.append(sense)
+                            wj_usr.append(questions[si]['wj'])
+                            labels_usr.append(questions[si]['label'])
+                            self.update_cluster_center(sense, questions[si]['embedding'])
+                            self.add_sense_context_words(sense, self.context_words_indices(seq, si))
+                        wi_new += wi_usr
+                        wj_new += wj_usr
+                        lables_new += labels_usr
+                        self.trainer.update(self.wordvec_matrix, self.weight_matrix, self.biases,
+                                            labels_usr, wi_usr, wj_usr)
                 monitor_obj(monitor, k, self.get_obj(wi_new, wj_new, lables_new), switcher=(k % MONITOR_GAP == 0))
             self.take_snapshot(snapshot_path, e)
             print
@@ -448,7 +446,7 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                 sense = len(self.word_list)
                 self.word_list.append(word)
                 self.word_matrix_index[word].append(sense)
-            elif dist_var < self.ask_threshold:
+            elif self.sense_count(word) > 1 and dist_var < self.ask_threshold:
                 asking = True
         if not asking:
             self.update_cluster_center(sense, context_embedding)
@@ -461,7 +459,7 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
     def add_sense_context_words(self, sense, word_indices):
         self.context_words_map[sense] |= set(word_indices)
         if len(self.context_words_map[sense]) > self.context_words_limit:
-            l = numpy.asarray(self.context_words_map[sense])
+            l = numpy.asarray(list(self.context_words_map[sense]))
             ids = nearest_k_points(self.cluster_center(sense), [self.weight_matrix[c] for c in l],
                                    self.context_words_limit, self.distance_type).keys()
             self.context_words_map[sense].intersection_update(l[ids])
