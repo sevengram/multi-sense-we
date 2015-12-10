@@ -21,8 +21,8 @@ def build_monitor(total_lines, monitor_values=None):
             total_time = (time.time() - start_time) / percent
             remain_time = start_time + total_time - time.time()
             sys.stdout.write(
-                '%.2f%%, estimated remaining time: %d min, objective value: %f\r' % (
-                    percent * 100, int(remain_time / 60), objval))
+                '%.2f%%, estimated remaining time: %s sec, objective value: %f\r' % (
+                    percent * 100, remain_time, objval))
             sys.stdout.flush()
     return m
 
