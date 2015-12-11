@@ -437,7 +437,7 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
         context_embedding = self.context_embedding(seq, si)
         word = self.word_list[seq[si]]
         sense, min_dist, dist_var = self.find_nearest_sense(word, context_embedding)
-        asking = dist_var < self.ask_threshold
+        asking = (dist_var < self.ask_threshold) and self.all_sense_has_context_words(word)
         if not asking:
             self.update_cluster_center(sense, context_embedding)
             self.add_sense_context_words(sense, self.context_words_indices(seq, si))
@@ -454,7 +454,8 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                 sense = len(self.word_list)
                 self.word_list.append(word)
                 self.word_matrix_index[word].append(sense)
-            elif self.sense_count(word) > 1 and dist_var < self.ask_threshold:
+            elif self.sense_count(word) > 1 and dist_var < self.ask_threshold and self.all_sense_has_context_words(
+                    word):
                 asking = True
         if not asking:
             self.update_cluster_center(sense, context_embedding)
@@ -471,3 +472,9 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
             ids = nearest_k_points(self.cluster_center(sense), [self.weight_matrix[c] for c in l],
                                    self.context_words_limit, self.distance_type).keys()
             self.context_words_map[sense].intersection_update(l[ids])
+
+    def all_sense_has_context_words(self, word):
+        for s in self.word_matrix_index[word]:
+            if not self.context_words_map[s]:
+                return False
+        return True
