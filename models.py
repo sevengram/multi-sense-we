@@ -4,7 +4,7 @@ import cPickle
 import collections
 
 import numpy
-from numpy import random, zeros, var
+from numpy import random, zeros, var, finfo
 from theano import tensor as T
 from scipy.spatial import distance
 
@@ -15,6 +15,7 @@ from user import UserClassifier
 
 MONITOR_GAP = 20
 SNAPSHOT_GAP = 1000
+MIN_FLOAT = finfo(numpy.float32).eps
 
 dist_func = {
     'COS': distance.cosine,
@@ -220,7 +221,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         total_length = self.words_limit + (self.sense_limit - 1) * num_multi_sense_words
         self.wordvec_matrix = (random.randn(total_length, self.dimension).astype(
             numpy.float32) - 0.5) / self.dimension
-        self.weight_matrix = zeros((self.words_limit, self.dimension), dtype=numpy.float32)
+        self.weight_matrix = zeros((self.words_limit, self.dimension), dtype=numpy.float32) + MIN_FLOAT
         self.biases = zeros(self.words_limit, dtype=numpy.float32)
         self.cluster_center_matrix = zeros((total_length, self.dimension), dtype=numpy.float32)
         self.cluster_word_count = zeros(total_length)
