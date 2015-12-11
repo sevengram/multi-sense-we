@@ -62,7 +62,7 @@ class UserClassifier(object):
         while self.qmap:
             answer = self.msg_queue.get()
             qid = answer['qid']
-            key = answer['key']
+            key = int(answer['key'])
             result[self.qmap[qid]] = key
             del self.qmap[qid]
         return result
