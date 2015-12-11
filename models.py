@@ -184,11 +184,14 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                 monitor_obj(monitor, k, self.get_obj(c[:, 0], c[:, 1], labels), switcher=(k % MONITOR_GAP == 0))
             self.take_snapshot(snapshot_path, e)
 
-    def context_words_indices(self, seq, si, with_si=False):
-        return seq[max(0, si - self.window_size): si] + ([si] if with_si else []) + seq[(si + 1):si + self.window_size]
+    def context_words_indices(self, seq, si):
+        return seq[max(0, si - self.window_size): si] + seq[(si + 1):si + self.window_size]
 
     def context_text(self, seq, si):
-        return ' '.join(self.get_words(self.context_words_indices(seq, si, True)))
+        words = []
+        for i in xrange(max(0, si - self.window_size * 2), min(len(seq), si + self.window_size * 2)):
+            words.append(('%s' if i != si else '<b>%s</b>') % self.word_list[seq[i]])
+        return ' '.join(words)
 
     def get_obj(self, wi, wj, labels):
         return self.trainer.objective_value(self.wordvec_matrix[wi], self.weight_matrix[wj], self.biases[wj], labels)
@@ -382,9 +385,11 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                 monitor_obj(monitor, k, self.get_obj(c[:, 0], c[:, 1], labels), switcher=(k == 0))
                 wi_new, wj_new, lables_new = [], [], []
                 for i in xrange(0, len(couples), self.batch_size):
-                    wi, wj, labels, questions = self.clustering_ask(seq, seq_indices[i:i + self.batch_size], sense_dict,
-                                                                    [c[1] for c in couples[i:i + self.batch_size]],
-                                                                    labels[i:i + self.batch_size])
+                    wi, wj, labels, questions, samples = self.clustering_ask(seq, seq_indices[i:i + self.batch_size],
+                                                                             sense_dict,
+                                                                             [c[1] for c in
+                                                                              couples[i:i + self.batch_size]],
+                                                                             labels[i:i + self.batch_size])
                     wi_new += wi
                     wj_new += wj
                     lables_new += labels
@@ -394,11 +399,13 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                         answers = self.user.ask(questions)
                         wi_usr, wj_usr, labels_usr = [], [], []
                         for si, sense in answers.iteritems():
-                            wi_usr.append(sense)
-                            wj_usr.append(questions[si]['wj'])
-                            labels_usr.append(questions[si]['label'])
+                            sense_dict[si] = sense
                             self.update_cluster_center(sense, questions[si]['embedding'])
                             self.add_sense_context_words(sense, self.context_words_indices(seq, si))
+                            for swi, swj, slabel in samples[si]:
+                                wi_usr.append(sense)
+                                wj_usr.append(swj)
+                                labels_usr.append(slabel)
                         wi_new += wi_usr
                         wj_new += wj_usr
                         lables_new += labels_usr
@@ -410,6 +417,7 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
     def clustering_ask(self, seq, seq_indices, sense_dict, wj, labels):
         wi_new, wj_new, labels_new = [], [], []
         questions = {}
+        samples = collections.defaultdict(list)
         for si, j, l in zip(seq_indices, wj, labels):
             if si in sense_dict:
                 wi_new.append(sense_dict[si])
@@ -420,13 +428,13 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                 if self.learn_multi_vec[wi]:
                     sense, asking, embedding = self.dpmeans(seq, si) if self.use_dpmeans else self.kmeans(seq, si)
                     if asking:
-                        questions[si] = {
-                            'stem': self.context_text(seq, si),
-                            'options': self.get_sense_context_words(wi),
-                            'wj': j,
-                            'label': l,
-                            'embedding': embedding
-                        }
+                        if si not in questions:
+                            questions[si] = {
+                                'stem': self.context_text(seq, si),
+                                'options': self.get_sense_context_words(wi),
+                                'embedding': embedding
+                            }
+                        samples[si].append((wi, j, l))
                     else:
                         wi_new.append(sense)
                         wj_new.append(j)
@@ -437,14 +445,14 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                     wj_new.append(j)
                     labels_new.append(l)
                     sense_dict[si] = wi
-        return wi_new, wj_new, labels_new, questions
+        return wi_new, wj_new, labels_new, questions, samples
 
     def kmeans(self, seq, si):
         # TODO: kmeans initialize
         context_embedding = self.context_embedding(seq, si)
         word = self.word_list[seq[si]]
         sense, min_dist, dist_var = self.find_nearest_sense(word, context_embedding)
-        asking = dist_var < self.ask_threshold
+        asking = (dist_var < self.ask_threshold) and self.all_sense_has_context_words(word)
         if not asking:
             self.update_cluster_center(sense, context_embedding)
             self.add_sense_context_words(sense, self.context_words_indices(seq, si))
@@ -461,9 +469,16 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                 sense = len(self.word_list)
                 self.word_list.append(word)
                 self.word_matrix_index[word].append(sense)
-            elif self.sense_count(word) > 1 and dist_var < self.ask_threshold:
+            elif self.sense_count(word) > 1 and dist_var < self.ask_threshold and self.all_sense_has_context_words(
+                    word):
                 asking = True
         if not asking:
             self.update_cluster_center(sense, context_embedding)
             self.add_sense_context_words(sense, self.context_words_indices(seq, si))
         return sense, asking, context_embedding
+
+    def all_sense_has_context_words(self, word):
+        for s in self.word_matrix_index[word]:
+            if not self.context_words_map[s]:
+                return False
+        return True
