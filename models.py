@@ -188,7 +188,10 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
         return seq[max(0, si - self.window_size): si] + ([si] if with_si else []) + seq[(si + 1):si + self.window_size]
 
     def context_text(self, seq, si):
-        return ' '.join(self.get_words(self.context_words_indices(seq, si, True)))
+        words = []
+        for i in xrange(max(0, si - self.window_size), min(len(seq), si + self.window_size)):
+            words.append(('%s' if i != si else '<b>%s</b>') % self.word_list[seq[i]])
+        return ' '.join(words)
 
     def get_obj(self, wi, wj, labels):
         return self.trainer.objective_value(self.wordvec_matrix[wi], self.weight_matrix[wj], self.biases[wj], labels)
