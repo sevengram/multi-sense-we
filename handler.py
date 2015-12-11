@@ -24,6 +24,10 @@ class AnswerHandler(BaseHandler):
         self.msg_queue = msg_queue
 
     @tornado.gen.coroutine
+    def get(self, *args, **kwargs):
+        self.send_response()
+
+    @tornado.gen.coroutine
     def post(self, *args, **kwargs):
         qid = self.get_argument('qid')
         key = self.get_argument('key')

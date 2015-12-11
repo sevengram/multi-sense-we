@@ -173,7 +173,7 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
 
     def fit(self, texts, nb_epoch=1, sampling=True, monitor=None, snapshot_path=None):
         for e in xrange(nb_epoch):
-            print("Epoch %s..." % e)
+            print("\nEpoch %s..." % e)
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 c = numpy.array(couples)
                 monitor_obj(monitor, k, self.get_obj(c[:, 0], c[:, 1], labels), switcher=(k == 0))
@@ -183,7 +183,6 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                                         labels[i:i + self.batch_size], wi, wj)
                 monitor_obj(monitor, k, self.get_obj(c[:, 0], c[:, 1], labels), switcher=(k % MONITOR_GAP == 0))
             self.take_snapshot(snapshot_path, e)
-            print
 
     def context_words_indices(self, seq, si, with_si=False):
         return seq[max(0, si - self.window_size): si] + ([si] if with_si else []) + seq[(si + 1):si + self.window_size]
@@ -276,7 +275,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 
     def fit(self, texts, nb_epoch=1, sampling=True, monitor=None, snapshot_path=None):
         for e in xrange(nb_epoch):
-            print("Epoch %s..." % e)
+            print("\nEpoch %s..." % e)
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 c = numpy.array(couples)
                 monitor_obj(monitor, k, self.get_obj(c[:, 0], c[:, 1], labels), switcher=(k == 0))
@@ -290,7 +289,6 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                                         labels[i:i + self.batch_size], wi, wj)
                 monitor_obj(monitor, k, self.get_obj(wi_new, c[:, 1], labels), switcher=(k % MONITOR_GAP == 0))
             self.take_snapshot(snapshot_path, e)
-            print
 
     def clustering(self, seq, seq_indices, sense_dict):
         wi_new = []
@@ -349,18 +347,20 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
     def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1., batch_size=8, sense_limit=5,
                  threshold=.5, min_count=5, distance_type='COS', use_dpmeans=True, ask_threshold=.4,
-                 context_words_limit=15):
+                 context_words_limit=15, msg_queue=None):
         super(InteractiveClSgNsEmbeddingModel, self).__init__(words_limit, dimension, window_size, neg_sample_rate,
                                                               batch_size, sense_limit, threshold, min_count,
                                                               distance_type, use_dpmeans)
         self.ask_threshold = ask_threshold
         self.context_words_limit = context_words_limit
         self.context_words_map = collections.defaultdict(set)
+        self.user = UserClassifier(msg_queue)
 
     def fit(self, texts, nb_epoch=1, sampling=True, monitor=None, snapshot_path=None):
-        user = UserClassifier()
+        self.user.create_task()
+        print("Task created!")
         for e in xrange(nb_epoch):
-            print("Epoch %s..." % e)
+            print("\nEpoch %s..." % e)
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 sense_dict = {}
                 c = numpy.array(couples)
@@ -376,7 +376,7 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                     self.trainer.update(self.wordvec_matrix, self.weight_matrix, self.biases,
                                         labels, wi, wj)
                     if questions:
-                        answers = user.ask(questions)
+                        answers = self.user.ask(questions)
                         wi_usr, wj_usr, labels_usr = [], [], []
                         for si, sense in answers.iteritems():
                             wi_usr.append(sense)
@@ -391,7 +391,6 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                                             labels_usr, wi_usr, wj_usr)
                 monitor_obj(monitor, k, self.get_obj(wi_new, wj_new, lables_new), switcher=(k % MONITOR_GAP == 0))
             self.take_snapshot(snapshot_path, e)
-            print
 
     def clustering_ask(self, seq, seq_indices, sense_dict, wj, labels):
         wi_new, wj_new, labels_new = [], [], []
@@ -410,7 +409,7 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                             'stem': self.context_text(seq, si),
                             'options': self.get_sense_context_words(wi),
                             'wj': j,
-                            'labels': l,
+                            'label': l,
                             'embedding': embedding
                         }
                     else:
