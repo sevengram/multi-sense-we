@@ -178,7 +178,7 @@ if __name__ == '__main__':
                   snapshot_path=snapshot_path_base if args.snapshot else None)
         print('\nfinish!')
 
-    if args.save_params:
+    if args.save_params and not args.snapshot:
         print('saveing all parameters...')
         model.dump(build_filepath(sub_dir, args.tag, 'params'))
 
