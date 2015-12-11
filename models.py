@@ -370,9 +370,11 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                 monitor_obj(monitor, k, self.get_obj(c[:, 0], c[:, 1], labels), switcher=(k == 0))
                 wi_new, wj_new, lables_new = [], [], []
                 for i in xrange(0, len(couples), self.batch_size):
-                    wi, wj, labels, questions = self.clustering_ask(seq, seq_indices[i:i + self.batch_size], sense_dict,
-                                                                    [c[1] for c in couples[i:i + self.batch_size]],
-                                                                    labels[i:i + self.batch_size])
+                    wi, wj, labels, questions, samples = self.clustering_ask(seq, seq_indices[i:i + self.batch_size],
+                                                                             sense_dict,
+                                                                             [c[1] for c in
+                                                                              couples[i:i + self.batch_size]],
+                                                                             labels[i:i + self.batch_size])
                     wi_new += wi
                     wj_new += wj
                     lables_new += labels
@@ -382,12 +384,13 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                         answers = self.user.ask(questions)
                         wi_usr, wj_usr, labels_usr = [], [], []
                         for si, sense in answers.iteritems():
-                            wi_usr.append(sense)
-                            wj_usr.append(questions[si]['wj'])
-                            labels_usr.append(questions[si]['label'])
                             sense_dict[si] = sense
                             self.update_cluster_center(sense, questions[si]['embedding'])
                             self.add_sense_context_words(sense, self.context_words_indices(seq, si))
+                            for swi, swj, slabel in samples[si]:
+                                wi_usr.append(sense)
+                                wj_usr.append(swj)
+                                labels_usr.append(slabel)
                         wi_new += wi_usr
                         wj_new += wj_usr
                         lables_new += labels_usr
@@ -399,6 +402,7 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
     def clustering_ask(self, seq, seq_indices, sense_dict, wj, labels):
         wi_new, wj_new, labels_new = [], [], []
         questions = {}
+        samples = collections.defaultdict(list)
         for si, j, l in zip(seq_indices, wj, labels):
             if si in sense_dict:
                 wi_new.append(sense_dict[si])
@@ -409,13 +413,13 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                 if self.learn_multi_vec[wi]:
                     sense, asking, embedding = self.dpmeans(seq, si) if self.use_dpmeans else self.kmeans(seq, si)
                     if asking:
-                        questions[si] = {
-                            'stem': self.context_text(seq, si),
-                            'options': self.get_sense_context_words(wi),
-                            'wj': j,
-                            'label': l,
-                            'embedding': embedding
-                        }
+                        if si not in questions:
+                            questions[si] = {
+                                'stem': self.context_text(seq, si),
+                                'options': self.get_sense_context_words(wi),
+                                'embedding': embedding
+                            }
+                        samples[si].append((wi, wj, l))
                     else:
                         wi_new.append(sense)
                         wj_new.append(j)
@@ -426,7 +430,7 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                     wj_new.append(j)
                     labels_new.append(l)
                     sense_dict[si] = wi
-        return wi_new, wj_new, labels_new, questions
+        return wi_new, wj_new, labels_new, questions, samples
 
     def kmeans(self, seq, si):
         # TODO: kmeans initialize
