@@ -26,7 +26,7 @@ class QuestionThread(threading.Thread):
             'stem': self.question['stem'],
             'options': json.dumps(self.question['options'])
         }
-        print('post question:%s' % data)
+        # print('post question:%s' % data)
         resp = http.post_dict(question_url, data)
         resp_data = json.loads(resp.body)
         self.qmap[resp_data['data']['qid']] = self.index
