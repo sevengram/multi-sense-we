@@ -357,6 +357,8 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
         self.user = UserClassifier(msg_queue)
 
     def fit(self, texts, nb_epoch=1, sampling=True, monitor=None, snapshot_path=None):
+        self.user.create_task()
+        print("Task created!")
         for e in xrange(nb_epoch):
             print("\nEpoch %s..." % e)
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
@@ -407,7 +409,7 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                             'stem': self.context_text(seq, si),
                             'options': self.get_sense_context_words(wi),
                             'wj': j,
-                            'labels': l,
+                            'label': l,
                             'embedding': embedding
                         }
                     else:

@@ -8,11 +8,12 @@ import cPickle
 import datetime
 import argparse
 import Queue
+
 import tornado.web
 import tornado.httpserver
 import tornado.ioloop
-from handler import AnswerHandler
 
+from handler import AnswerHandler
 from models import ClusteringSgNsEmbeddingModel, SkipGramNegSampEmbeddingModel, InteractiveClSgNsEmbeddingModel
 
 msg_queue = Queue.Queue()

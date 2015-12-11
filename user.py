@@ -41,7 +41,7 @@ class UserClassifier(object):
     def create_task(self):
         resp = http.post_dict(task_url, {
             'type': 1,
-            'resp_url': callback_url,  # FIXME
+            'resp_url': callback_url,
             'title': 'Word Embedding Task'
         })
         resp_data = json.loads(resp.body)
