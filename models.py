@@ -204,7 +204,7 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
 class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
     def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1., batch_size=8, sense_limit=5,
                  threshold=.5, min_count=5, distance_type='COS', use_dpmeans=True, multi_sense_word_limit=None,
-                 single_sense_list=None):
+                 single_sense_list=None, context_words_limit=15):
         super(ClusteringSgNsEmbeddingModel, self).__init__(words_limit=words_limit, dimension=dimension,
                                                            window_size=window_size, neg_sample_rate=neg_sample_rate,
                                                            batch_size=batch_size, min_count=min_count)
@@ -217,6 +217,8 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         self.use_dpmeans = use_dpmeans
         self.multi_sense_word_limit = multi_sense_word_limit
         self.single_sense_list = single_sense_list
+        self.context_words_limit = context_words_limit
+        self.context_words_map = collections.defaultdict(set)
 
     def _init_values(self):
         num_multi_sense_words = sum(self.learn_multi_vec)
@@ -236,7 +238,8 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                       self.cluster_center_matrix,
                       self.cluster_word_count,
                       self.word_matrix_index,
-                      self.word_list]
+                      self.word_list,
+                      self.context_words_map]
             cPickle.dump(params, open(path, 'wb'))
 
     def load(self, path):
@@ -256,6 +259,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
             self.cluster_word_count = params[4]
             self.word_matrix_index = params[5]
             self.word_list = params[6]
+            self.context_words_map = params[7]
 
     def _load_words(self, single_sense_list=None, multi_sense_word_limit=None):
         self.words_limit = min(self.words_limit, self.tokenizer.count())
@@ -318,6 +322,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         word = self.word_list[seq[si]]
         sense = self.find_nearest_sense(word, context_embedding)[0]
         self.update_cluster_center(sense, context_embedding)
+        self.add_sense_context_words(sense, self.context_words_indices(seq, si))
         return sense
 
     def dpmeans(self, seq, si):
@@ -331,6 +336,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                 self.word_list.append(word)
                 self.word_matrix_index[word].append(sense)
         self.update_cluster_center(sense, context_embedding)
+        self.add_sense_context_words(sense, self.context_words_indices(seq, si))
         return sense
 
     def context_embedding(self, seq, si):
@@ -346,6 +352,17 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         self.cluster_center_matrix[sense] += embedding
         self.cluster_word_count[sense] += 1
 
+    def get_sense_context_words(self, wi):
+        return {sense: self.get_words(self.context_words_map[sense]) for sense in self.get_senses(wi)}
+
+    def add_sense_context_words(self, sense, word_indices):
+        self.context_words_map[sense] |= set(word_indices)
+        if len(self.context_words_map[sense]) > self.context_words_limit:
+            l = numpy.asarray(list(self.context_words_map[sense]))
+            ids = nearest_k_points(self.cluster_center(sense), [self.weight_matrix[c] for c in l],
+                                   self.context_words_limit, self.distance_type).keys()
+            self.context_words_map[sense].intersection_update(l[ids])
+
 
 class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
     def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1., batch_size=8, sense_limit=5,
@@ -353,10 +370,8 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                  context_words_limit=15, msg_queue=None):
         super(InteractiveClSgNsEmbeddingModel, self).__init__(words_limit, dimension, window_size, neg_sample_rate,
                                                               batch_size, sense_limit, threshold, min_count,
-                                                              distance_type, use_dpmeans)
+                                                              distance_type, use_dpmeans, context_words_limit)
         self.ask_threshold = ask_threshold
-        self.context_words_limit = context_words_limit
-        self.context_words_map = collections.defaultdict(set)
         self.user = UserClassifier(msg_queue)
 
     def fit(self, texts, nb_epoch=1, sampling=True, monitor=None, snapshot_path=None):
@@ -461,17 +476,6 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
             self.update_cluster_center(sense, context_embedding)
             self.add_sense_context_words(sense, self.context_words_indices(seq, si))
         return sense, asking, context_embedding
-
-    def get_sense_context_words(self, wi):
-        return {sense: self.get_words(self.context_words_map[sense]) for sense in self.get_senses(wi)}
-
-    def add_sense_context_words(self, sense, word_indices):
-        self.context_words_map[sense] |= set(word_indices)
-        if len(self.context_words_map[sense]) > self.context_words_limit:
-            l = numpy.asarray(list(self.context_words_map[sense]))
-            ids = nearest_k_points(self.cluster_center(sense), [self.weight_matrix[c] for c in l],
-                                   self.context_words_limit, self.distance_type).keys()
-            self.context_words_map[sense].intersection_update(l[ids])
 
     def all_sense_has_context_words(self, word):
         for s in self.word_matrix_index[word]:
