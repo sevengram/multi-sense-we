@@ -184,12 +184,12 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                 monitor_obj(monitor, k, self.get_obj(c[:, 0], c[:, 1], labels), switcher=(k % MONITOR_GAP == 0))
             self.take_snapshot(snapshot_path, e)
 
-    def context_words_indices(self, seq, si, with_si=False):
-        return seq[max(0, si - self.window_size): si] + ([si] if with_si else []) + seq[(si + 1):si + self.window_size]
+    def context_words_indices(self, seq, si):
+        return seq[max(0, si - self.window_size): si] + seq[(si + 1):si + self.window_size]
 
     def context_text(self, seq, si):
         words = []
-        for i in xrange(max(0, si - self.window_size), min(len(seq), si + self.window_size)):
+        for i in xrange(max(0, si - self.window_size * 2), min(len(seq), si + self.window_size * 2)):
             words.append(('%s' if i != si else '<b>%s</b>') % self.word_list[seq[i]])
         return ' '.join(words)
 
