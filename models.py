@@ -419,7 +419,7 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                                 'options': self.get_sense_context_words(wi),
                                 'embedding': embedding
                             }
-                        samples[si].append((wi, wj, l))
+                        samples[si].append((wi, j, l))
                     else:
                         wi_new.append(sense)
                         wj_new.append(j)
