@@ -195,7 +195,7 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
 
     def take_snapshot(self, path, name):
         if path:
-            self.dump('%s/%s.pkl' % (path, name))
+            self.dump('%s_%s.pkl' % (path, name))
 
 
 class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
