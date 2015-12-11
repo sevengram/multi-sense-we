@@ -1,14 +1,15 @@
 # -*- coding:utf-8 -*-
 
-import Queue
 import json
 import threading
 
 import http
 
-question_url = 'http://115.28.254.167/learning/questions'
+question_url = 'http://128.138.202.125/learning/questions'
 
-task_url = 'http://115.28.254.167/learning/tasks'
+task_url = 'http://128.138.202.125/learning/tasks'
+
+callback_url = 'http://128.138.202.125/trainer/callback'
 
 
 class QuestionThread(threading.Thread):
@@ -32,15 +33,15 @@ class QuestionThread(threading.Thread):
 
 
 class UserClassifier(object):
-    def __init__(self):
+    def __init__(self, msg_queue):
         self.qmap = {}
         self.tid = None
-        self.msg_queue = Queue.Queue()
+        self.msg_queue = msg_queue
 
     def create_task(self):
         resp = http.post_dict(task_url, {
             'type': 1,
-            'resp_url': '',  # FIXME
+            'resp_url': callback_url,  # FIXME
             'title': 'Word Embedding Task'
         })
         resp_data = json.loads(resp.body)

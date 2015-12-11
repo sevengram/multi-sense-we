@@ -2,12 +2,20 @@
 
 import os
 import sys
+import threading
 import time
 import cPickle
 import datetime
 import argparse
+import Queue
+import tornado.web
+import tornado.httpserver
+import tornado.ioloop
+from handler import AnswerHandler
 
 from models import ClusteringSgNsEmbeddingModel, SkipGramNegSampEmbeddingModel, InteractiveClSgNsEmbeddingModel
+
+msg_queue = Queue.Queue()
 
 
 def build_monitor(total_lines, monitor_values=None):
@@ -53,6 +61,48 @@ def file_lines(path):
     return i + 1
 
 
+class TrainingThread(threading.Thread):
+    def __init__(self, _args, _model, _sub_dir):
+        threading.Thread.__init__(self)
+        self.args = _args
+        self.model = _model
+        self.sub_dir = _sub_dir
+
+    def run(self):
+        print('start fitting model...')
+        obj_trajectory = []
+        snapshot_path_base = None
+        if self.args.snapshot:
+            params_path = build_filepath(self.sub_dir, self.args.tag, 'params')
+            snapshot_path_base = params_path[:-4]
+        self.model.set_trainer(lr=self.args.lr, lr_b=self.args.lr_b,
+                               momentum=self.args.momentum,
+                               momentum_b=self.args.momentum_b,
+                               optimizer=self.args.optimizer)
+        self.model.fit(text_builder(self.args.data), nb_epoch=self.args.epoch,
+                       monitor=build_monitor(file_lines(self.args.data),
+                                             obj_trajectory if self.args.objective else None),
+                       snapshot_path=snapshot_path_base)
+        print('\nfinish!')
+
+        if self.args.save_params:
+            print('saveing all parameters...')
+            self.model.dump(build_filepath(self.sub_dir, self.args.tag, 'params'))
+
+        if self.args.output and self.args.save_vec and not self.args.save_params:
+            print('saving word vectors...')
+            self.model.save_word_vectors(build_filepath(self.sub_dir, self.args.tag, 'word_vec'))
+            self.model.save_weight_matrix(build_filepath(self.sub_dir, self.args.tag, 'weights'))
+
+        if self.args.output and self.args.objective:
+            cPickle.dump(obj_trajectory, open(build_filepath(self.sub_dir, self.args.tag, 'objective'), "wb"))
+            fo = open(self.sub_dir + '/' + self.args.tag + '_objective.txt', 'w')
+            for obj in obj_trajectory:
+                fo.write(str(obj) + '\n')
+            fo.close()
+        print('end time: %s' % time.ctime())
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', metavar='MODEL', help='which model to use', type=str, default='CL')
@@ -82,7 +132,7 @@ if __name__ == '__main__':
     parser.add_argument('--objective', help='Save objective value or not', action='store_true')
     parser.add_argument("--snapshot", help="Take snapshot while training", action='store_true')
     parser.add_argument('--save_vec', help='Save word vectors and context vectors', action='store_true')
-    parser.add_argument("--test", help="Run a manual test after loading/training", action='store_true')
+    # parser.add_argument("--test", help="Run a manual test after loading/training", action='store_true')
     args = parser.parse_args()
 
     if args.output and not os.path.exists(args.output):
@@ -130,7 +180,7 @@ if __name__ == '__main__':
     elif args.model == 'IC':
         model = InteractiveClSgNsEmbeddingModel(words_limit=args.limit, dimension=args.dimension,
                                                 window_size=args.window, batch_size=args.batch,
-                                                min_count=args.min_count, neg_sample_rate=args.neg)
+                                                min_count=args.min_count, neg_sample_rate=args.neg, msg_queue=msg_queue)
     else:
         NotImplementedError()
 
@@ -155,8 +205,6 @@ if __name__ == '__main__':
         model.save_word_list(build_filepath(sub_dir, args.tag, 'word_list'))
         model.save_word_index(build_filepath(sub_dir, args.tag, 'word_index'))
 
-    obj_trajectory = [] if args.objective else None
-
     if args.wordvec:
         print('start loading word vectors...')
         model.load_word_vectors(args.wordvec)
@@ -165,51 +213,37 @@ if __name__ == '__main__':
         print('loading previous parameters...')
         model.load(args.load_params)
 
-    if not args.test:
-        print('start fitting model...')
-        snapshot_path_base = None
-        if args.snapshot:
-            params_path = build_filepath(sub_dir, args.tag, 'params')
-            snapshot_path_base = params_path[:-4]
-        model.set_trainer(lr=args.lr, lr_b=args.lr_b, momentum=args.momentum, momentum_b=args.momentum_b,
-                          optimizer=args.optimizer)
-        model.fit(text_builder(args.data), nb_epoch=args.epoch,
-                  monitor=build_monitor(file_lines(args.data), obj_trajectory),
-                  snapshot_path=snapshot_path_base if args.snapshot else None)
-        print('\nfinish!')
+    t = TrainingThread(args, model, sub_dir)
+    t.setDaemon(True)
+    t.start()
 
-    if args.save_params:
-        print('saveing all parameters...')
-        model.dump(build_filepath(sub_dir, args.tag, 'params'))
+    if args.model == 'IC':
+        application = tornado.web.Application(
+            handlers=[
+                (r'/callback', AnswerHandler, {'msg_queue': msg_queue})
+            ], debug=True
+        )
+        http_server = tornado.httpserver.HTTPServer(application, xheaders=True)
+        http_server.listen(3456)
+        tornado.ioloop.IOLoop.instance().start()
+        print("server started!")
 
-    if args.output and args.save_vec and not args.save_params:
-        print('saving word vectors...')
-        model.save_word_vectors(build_filepath(sub_dir, args.tag, 'word_vec'))
-        model.save_weight_matrix(build_filepath(sub_dir, args.tag, 'weights'))
+        # print('you may reload the vocab and model, and add --test to run a manual test.')
 
-    if args.output and args.objective:
-        cPickle.dump(obj_trajectory, open(build_filepath(sub_dir, args.tag, 'objective'), "wb"))
-        f = open(sub_dir + '/' + args.tag + '_objective.txt', 'w')
-        for obj in obj_trajectory:
-            f.write(str(obj) + '\n')
-        f.close()
-
-    print('end time: %s' % time.ctime())
-    print('you may reload the vocab and model, and add --test to run a manual test.')
-
-    while args.test:
-        word = raw_input('input a word (\q to exit): ')
-        word = word.strip()
-        if not word:
-            continue
-        if word == '\q':
-            break
-        if args.model == 'SG':
-            print(model.nearest_words(word.lower()))
-        elif args.model == 'CL':
-            word_list = model.nearest_words(word.lower())
-            for i, nearest_sense in enumerate(word_list):
-                print "sense", i, ":"
-                print(nearest_sense)
-        else:
-            NotImplementedError()
+        # TODO: will move to a single file
+        # while args.test:
+        #     word = raw_input('input a word (\q to exit): ')
+        #     word = word.strip()
+        #     if not word:
+        #         continue
+        #     if word == '\q':
+        #         break
+        #     if args.model == 'SG':
+        #         print(model.nearest_words(word.lower()))
+        #     elif args.model == 'CL':
+        #         word_list = model.nearest_words(word.lower())
+        #         for i, nearest_sense in enumerate(word_list):
+        #             print "sense", i, ":"
+        #             print(nearest_sense)
+        #     else:
+        #         NotImplementedError()

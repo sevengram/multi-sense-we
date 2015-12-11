@@ -348,16 +348,16 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
     def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1., batch_size=8, sense_limit=5,
                  threshold=.5, min_count=5, distance_type='COS', use_dpmeans=True, ask_threshold=.4,
-                 context_words_limit=15):
+                 context_words_limit=15, msg_queue=None):
         super(InteractiveClSgNsEmbeddingModel, self).__init__(words_limit, dimension, window_size, neg_sample_rate,
                                                               batch_size, sense_limit, threshold, min_count,
                                                               distance_type, use_dpmeans)
         self.ask_threshold = ask_threshold
         self.context_words_limit = context_words_limit
         self.context_words_map = collections.defaultdict(set)
+        self.user = UserClassifier(msg_queue)
 
     def fit(self, texts, nb_epoch=1, sampling=True, monitor=None, snapshot_path=None):
-        user = UserClassifier()
         for e in xrange(nb_epoch):
             print("Epoch %s..." % e)
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
@@ -375,7 +375,7 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                     self.trainer.update(self.wordvec_matrix, self.weight_matrix, self.biases,
                                         labels, wi, wj)
                     if questions:
-                        answers = user.ask(questions)
+                        answers = self.user.ask(questions)
                         wi_usr, wj_usr, labels_usr = [], [], []
                         for si, sense in answers.iteritems():
                             wi_usr.append(sense)
