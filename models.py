@@ -385,6 +385,7 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                             wi_usr.append(sense)
                             wj_usr.append(questions[si]['wj'])
                             labels_usr.append(questions[si]['label'])
+                            sense_dict[si] = sense
                             self.update_cluster_center(sense, questions[si]['embedding'])
                             self.add_sense_context_words(sense, self.context_words_indices(seq, si))
                         wi_new += wi_usr
