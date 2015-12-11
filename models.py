@@ -4,7 +4,7 @@ import cPickle
 import collections
 
 import numpy
-from numpy import random, zeros, var
+from numpy import random, zeros, var, finfo
 from theano import tensor as T
 from scipy.spatial import distance
 
@@ -15,6 +15,7 @@ from user import UserClassifier
 
 MONITOR_GAP = 20
 SNAPSHOT_GAP = 1000
+MIN_FLOAT = finfo(numpy.float32).eps
 
 dist_func = {
     'COS': distance.cosine,
@@ -172,7 +173,7 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
 
     def fit(self, texts, nb_epoch=1, sampling=True, monitor=None, snapshot_path=None):
         for e in xrange(nb_epoch):
-            print("Epoch %s..." % e)
+            print("\nEpoch %s..." % e)
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 c = numpy.array(couples)
                 monitor_obj(monitor, k, self.get_obj(c[:, 0], c[:, 1], labels), switcher=(k == 0))
@@ -182,7 +183,6 @@ class SkipGramNegSampEmbeddingModel(WordEmbeddingModel):
                                         labels[i:i + self.batch_size], wi, wj)
                 monitor_obj(monitor, k, self.get_obj(c[:, 0], c[:, 1], labels), switcher=(k % MONITOR_GAP == 0))
             self.take_snapshot(snapshot_path, e)
-            print
 
     def context_words_indices(self, seq, si, with_si=False):
         return seq[max(0, si - self.window_size): si] + ([si] if with_si else []) + seq[(si + 1):si + self.window_size]
@@ -220,7 +220,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
         total_length = self.words_limit + (self.sense_limit - 1) * num_multi_sense_words
         self.wordvec_matrix = (random.randn(total_length, self.dimension).astype(
             numpy.float32) - 0.5) / self.dimension
-        self.weight_matrix = zeros((self.words_limit, self.dimension), dtype=numpy.float32)
+        self.weight_matrix = zeros((self.words_limit, self.dimension), dtype=numpy.float32) + MIN_FLOAT
         self.biases = zeros(self.words_limit, dtype=numpy.float32)
         self.cluster_center_matrix = zeros((total_length, self.dimension), dtype=numpy.float32)
         self.cluster_word_count = zeros(total_length)
@@ -275,7 +275,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 
     def fit(self, texts, nb_epoch=1, sampling=True, monitor=None, snapshot_path=None):
         for e in xrange(nb_epoch):
-            print("Epoch %s..." % e)
+            print("\nEpoch %s..." % e)
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 c = numpy.array(couples)
                 monitor_obj(monitor, k, self.get_obj(c[:, 0], c[:, 1], labels), switcher=(k == 0))
@@ -289,7 +289,6 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
                                         labels[i:i + self.batch_size], wi, wj)
                 monitor_obj(monitor, k, self.get_obj(wi_new, c[:, 1], labels), switcher=(k % MONITOR_GAP == 0))
             self.take_snapshot(snapshot_path, e)
-            print
 
     def clustering(self, seq, seq_indices, sense_dict):
         wi_new = []
@@ -359,7 +358,7 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
 
     def fit(self, texts, nb_epoch=1, sampling=True, monitor=None, snapshot_path=None):
         for e in xrange(nb_epoch):
-            print("Epoch %s..." % e)
+            print("\nEpoch %s..." % e)
             for k, (seq, (couples, labels, seq_indices)) in enumerate(self._sequentialize(texts, sampling)):
                 sense_dict = {}
                 c = numpy.array(couples)
@@ -390,7 +389,6 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                                             labels_usr, wi_usr, wj_usr)
                 monitor_obj(monitor, k, self.get_obj(wi_new, wj_new, lables_new), switcher=(k % MONITOR_GAP == 0))
             self.take_snapshot(snapshot_path, e)
-            print
 
     def clustering_ask(self, seq, seq_indices, sense_dict, wj, labels):
         wi_new, wj_new, labels_new = [], [], []

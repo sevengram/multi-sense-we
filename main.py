@@ -85,7 +85,7 @@ class TrainingThread(threading.Thread):
                        snapshot_path=snapshot_path_base)
         print('\nfinish!')
 
-        if self.args.save_params:
+        if self.args.save_params and not self.args.snapshot:
             print('saveing all parameters...')
             self.model.dump(build_filepath(self.sub_dir, self.args.tag, 'params'))
 
