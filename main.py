@@ -133,7 +133,7 @@ if __name__ == '__main__':
     parser.add_argument('--objective', help='Save objective value or not', action='store_true')
     parser.add_argument("--snapshot", help="Take snapshot while training", action='store_true')
     parser.add_argument('--save_vec', help='Save word vectors and context vectors', action='store_true')
-    # parser.add_argument("--test", help="Run a manual test after loading/training", action='store_true')
+    parser.add_argument("--test", help="Run a manual test after loading/training", action='store_true')
     args = parser.parse_args()
 
     if args.output and not os.path.exists(args.output):
@@ -213,7 +213,22 @@ if __name__ == '__main__':
     if args.load_params:
         print('loading previous parameters...')
         model.load(args.load_params)
-
+    while args.test:
+        word = raw_input('input a word (\q to exit): ')
+        word = word.strip()
+        if not word:
+            continue
+        if word == '\q':
+            break
+        if args.model == 'SG':
+            print(model.nearest_words(word.lower()))
+        elif args.model == 'CL':
+            word_list = model.nearest_words(word.lower())
+            for i, nearest_sense in enumerate(word_list):
+                print "sense", i, ":"
+                print(nearest_sense)
+        else:
+            NotImplementedError()
     t = TrainingThread(args, model, sub_dir)
     t.setDaemon(True)
     t.start()
@@ -232,19 +247,4 @@ if __name__ == '__main__':
         # print('you may reload the vocab and model, and add --test to run a manual test.')
 
         # TODO: will move to a single file
-        # while args.test:
-        #     word = raw_input('input a word (\q to exit): ')
-        #     word = word.strip()
-        #     if not word:
-        #         continue
-        #     if word == '\q':
-        #         break
-        #     if args.model == 'SG':
-        #         print(model.nearest_words(word.lower()))
-        #     elif args.model == 'CL':
-        #         word_list = model.nearest_words(word.lower())
-        #         for i, nearest_sense in enumerate(word_list):
-        #             print "sense", i, ":"
-        #             print(nearest_sense)
-        #     else:
-        #         NotImplementedError()
+    
