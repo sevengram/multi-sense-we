@@ -62,6 +62,40 @@ def file_lines(path):
     return i + 1
 
 
+def train_model(args, model, sub_dir):
+    print('start fitting model...')
+    obj_trajectory = []
+    snapshot_path_base = None
+    if args.snapshot:
+        params_path = build_filepath(sub_dir, args.tag, 'params')
+        snapshot_path_base = params_path[:-4]
+    model.set_trainer(lr=args.lr, lr_b=args.lr_b,
+                      momentum=args.momentum, momentum_b=args.momentum_b,
+                      optimizer=args.optimizer)
+    model.fit(text_builder(args.data), nb_epoch=args.epoch,
+              monitor=build_monitor(file_lines(args.data),obj_trajectory if args.objective else None),
+              snapshot_path=snapshot_path_base)
+    print('\nfinish!')
+
+    if args.save_params and not args.snapshot:
+        print('saveing all parameters...')
+        model.dump(build_filepath(sub_dir, args.tag, 'params'))
+
+    if args.output and args.save_vec and not args.save_params:
+        print('saving word vectors...')
+        model.save_word_vectors(build_filepath(sub_dir, args.tag, 'word_vec'))
+        model.save_weight_matrix(build_filepath(sub_dir, args.tag, 'weights'))
+
+    if args.output and args.objective:
+        cPickle.dump(obj_trajectory, open(build_filepath(sub_dir, args.tag, 'objective'), "wb"))
+        fo = open(sub_dir + '/' + args.tag + '_objective.txt', 'w')
+        for obj in obj_trajectory:
+            fo.write(str(obj) + '\n')
+        fo.close()
+    print('end time: %s' % time.ctime())
+    print('you may reload the vocab and model, and add --test to run a manual test.')
+
+
 class TrainingThread(threading.Thread):
     def __init__(self, _args, _model, _sub_dir):
         threading.Thread.__init__(self)
@@ -70,38 +104,7 @@ class TrainingThread(threading.Thread):
         self.sub_dir = _sub_dir
 
     def run(self):
-        print('start fitting model...')
-        obj_trajectory = []
-        snapshot_path_base = None
-        if self.args.snapshot:
-            params_path = build_filepath(self.sub_dir, self.args.tag, 'params')
-            snapshot_path_base = params_path[:-4]
-        self.model.set_trainer(lr=self.args.lr, lr_b=self.args.lr_b,
-                               momentum=self.args.momentum,
-                               momentum_b=self.args.momentum_b,
-                               optimizer=self.args.optimizer)
-        self.model.fit(text_builder(self.args.data), nb_epoch=self.args.epoch,
-                       monitor=build_monitor(file_lines(self.args.data),
-                                             obj_trajectory if self.args.objective else None),
-                       snapshot_path=snapshot_path_base)
-        print('\nfinish!')
-
-        if self.args.save_params and not self.args.snapshot:
-            print('saveing all parameters...')
-            self.model.dump(build_filepath(self.sub_dir, self.args.tag, 'params'))
-
-        if self.args.output and self.args.save_vec and not self.args.save_params:
-            print('saving word vectors...')
-            self.model.save_word_vectors(build_filepath(self.sub_dir, self.args.tag, 'word_vec'))
-            self.model.save_weight_matrix(build_filepath(self.sub_dir, self.args.tag, 'weights'))
-
-        if self.args.output and self.args.objective:
-            cPickle.dump(obj_trajectory, open(build_filepath(self.sub_dir, self.args.tag, 'objective'), "wb"))
-            fo = open(self.sub_dir + '/' + self.args.tag + '_objective.txt', 'w')
-            for obj in obj_trajectory:
-                fo.write(str(obj) + '\n')
-            fo.close()
-        print('end time: %s' % time.ctime())
+        train_model(self.args, self.model, self.sub_dir)
 
 
 if __name__ == '__main__':
@@ -129,6 +132,8 @@ if __name__ == '__main__':
     parser.add_argument('--lr_b', metavar='RATE', help='Learning rate for bias', type=float, required=False)
     parser.add_argument('--momentum', metavar='RATE', help='Momentum', type=float, default=.0)
     parser.add_argument('--momentum_b', metavar='RATE', help='Momentum for bias', type=float, required=False)
+    parser.add_argument('--ask_theta', metavar='THRESHOLD', help='threshold to ask user', type=float, default=.1)
+    parser.add_argument('--cl_theta', metavar='THRESHOLD', help='threshold to creat new cluster', type=float, default=.5)
     parser.add_argument('--optimizer', metavar='TYPE', help='Optimizer type', type=str, default='sgd')
     parser.add_argument('--objective', help='Save objective value or not', action='store_true')
     parser.add_argument("--snapshot", help="Take snapshot while training", action='store_true')
@@ -167,6 +172,8 @@ if __name__ == '__main__':
         f.write("learnMultiTop: " + str(args.learnMultiTop) + "\n")
         f.write("     skiplist: " + str(args.skiplist) + "\n")
         f.write("      wordvec: " + str(args.wordvec) + "\n")
+        f.write("ask_threshold: " + str(args.ask_theta) + "\n")
+        f.write(" cl_threshold: " + str(args.cl_theta) + "\n")
         f.close()
 
     multi_sense_skip_list = cPickle.load(open(args.skiplist, 'rb')) if args.skiplist else None
@@ -174,14 +181,16 @@ if __name__ == '__main__':
     model = None
     if args.model == 'CL':
         model = ClusteringSgNsEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window,
-                                             batch_size=args.batch, min_count=args.min_count, neg_sample_rate=args.neg)
+                                             batch_size=args.batch, min_count=args.min_count, neg_sample_rate=args.neg,
+                                             threshold=args.cl_theta)
     elif args.model == 'SG':
         model = SkipGramNegSampEmbeddingModel(words_limit=args.limit, dimension=args.dimension, window_size=args.window,
                                               batch_size=args.batch, min_count=args.min_count, neg_sample_rate=args.neg)
     elif args.model == 'IC':
         model = InteractiveClSgNsEmbeddingModel(words_limit=args.limit, dimension=args.dimension,
                                                 window_size=args.window, batch_size=args.batch,
-                                                min_count=args.min_count, neg_sample_rate=args.neg, msg_queue=msg_queue)
+                                                min_count=args.min_count, neg_sample_rate=args.neg, msg_queue=msg_queue,
+                                                threshold=args.cl_theta, ask_threshold=args.ask_theta)
     else:
         NotImplementedError()
 
@@ -213,6 +222,7 @@ if __name__ == '__main__':
     if args.load_params:
         print('loading previous parameters...')
         model.load(args.load_params)
+
     while args.test:
         word = raw_input('input a word (\q to exit): ')
         word = word.strip()
@@ -229,22 +239,19 @@ if __name__ == '__main__':
                 print(nearest_sense)
         else:
             NotImplementedError()
-    t = TrainingThread(args, model, sub_dir)
-    t.setDaemon(True)
-    t.start()
 
-    if args.model == 'IC':
-        application = tornado.web.Application(
-            handlers=[
-                (r'/callback', AnswerHandler, {'msg_queue': msg_queue})
-            ], debug=True
-        )
-        http_server = tornado.httpserver.HTTPServer(application, xheaders=True)
-        http_server.listen(3456)
-        tornado.ioloop.IOLoop.instance().start()
-        print("server started!")
-
-        # print('you may reload the vocab and model, and add --test to run a manual test.')
-
-        # TODO: will move to a single file
-    
+    if not args.test:
+        if args.model == 'IC':
+            t = TrainingThread(args, model, sub_dir)
+            t.start()
+            application = tornado.web.Application(
+                handlers=[
+                    (r'/callback', AnswerHandler, {'msg_queue': msg_queue})
+                ], debug=True
+            )
+            http_server = tornado.httpserver.HTTPServer(application, xheaders=True)
+            http_server.listen(3456)
+            tornado.ioloop.IOLoop.instance().start()
+            print("server started!")
+        else:
+            train_model(args, model, sub_dir)

@@ -4,6 +4,7 @@ import cPickle
 import collections
 
 import numpy
+from math import sqrt
 from numpy import random, zeros, var, finfo
 from theano import tensor as T
 from scipy.spatial import distance
@@ -314,7 +315,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
     def find_nearest_sense(self, word, postion):
         d = [dist_func[self.distance_type](self.cluster_center(wi), postion) for wi in self.word_matrix_index[word]]
         mi = numpy.argmin(d)
-        return self.word_matrix_index[word][mi], d[mi], var(d)
+        return self.word_matrix_index[word][mi], d[mi], sqrt(var(d))
 
     def kmeans(self, seq, si):
         # TODO: kmeans initialize
@@ -366,7 +367,7 @@ class ClusteringSgNsEmbeddingModel(SkipGramNegSampEmbeddingModel):
 
 class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
     def __init__(self, words_limit=5000, dimension=128, window_size=5, neg_sample_rate=1., batch_size=8, sense_limit=5,
-                 threshold=.5, min_count=5, distance_type='COS', use_dpmeans=True, ask_threshold=.4,
+                 threshold=.5, min_count=5, distance_type='COS', use_dpmeans=True, ask_threshold=.1,
                  context_words_limit=15, msg_queue=None):
         super(InteractiveClSgNsEmbeddingModel, self).__init__(words_limit, dimension, window_size, neg_sample_rate,
                                                               batch_size, sense_limit, threshold, min_count,
@@ -412,6 +413,8 @@ class InteractiveClSgNsEmbeddingModel(ClusteringSgNsEmbeddingModel):
                         self.trainer.update(self.wordvec_matrix, self.weight_matrix, self.biases,
                                             labels_usr, wi_usr, wj_usr)
                 monitor_obj(monitor, k, self.get_obj(wi_new, wj_new, lables_new), switcher=(k % MONITOR_GAP == 0))
+                if k % SNAPSHOT_GAP == 0 and k != 0:
+                    self.take_snapshot(snapshot_path, "middle")
             self.take_snapshot(snapshot_path, e)
 
     def clustering_ask(self, seq, seq_indices, sense_dict, wj, labels):
